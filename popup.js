@@ -24,11 +24,11 @@ startButton.addEventListener("click", async () => {
     });
 
     if (result?.needsLogin) {
-      setStatus("Please log in to GOLD, then run this again.");
+      setStatus("Please log in to GOLD. Scraping will start after login.");
       return;
     }
 
-    setStatus("GOLD is ready.");
+    setStatus("Scraping started.");
   } catch (error) {
     setStatus(`Error: ${error.message}`);
   } finally {

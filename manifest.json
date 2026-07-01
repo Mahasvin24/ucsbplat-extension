@@ -3,7 +3,7 @@
   "name": "UCSBPlat Helper",
   "version": "1.0",
   "description": "Scrapes GOLD and runs major progress check",
-  "permissions": ["scripting", "activeTab", "tabs"],
+  "permissions": ["scripting", "activeTab", "tabs", "storage"],
   "host_permissions": [
     "https://my.sa.ucsb.edu/gold/*"
   ],

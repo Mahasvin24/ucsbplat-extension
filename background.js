@@ -1,5 +1,6 @@
 const GOLD_URL_PATTERN = "https://my.sa.ucsb.edu/gold/*";
 const GOLD_LOGIN_URL = "https://my.sa.ucsb.edu/gold/";
+const PENDING_SCRAPE_KEY = "pendingGoldScrape";
 
 async function findGoldTab() {
   const tabs = await chrome.tabs.query({
@@ -27,10 +28,44 @@ async function getGoldLoginStatus(tab) {
   }
 }
 
-async function findOrOpenGoldLogin(major) {
+async function savePendingScrape(major) {
+  await chrome.storage.local.set({
+    [PENDING_SCRAPE_KEY]: {
+      major
+    }
+  });
+}
+
+async function clearPendingScrape() {
+  await chrome.storage.local.remove(PENDING_SCRAPE_KEY);
+}
+
+async function getPendingScrape() {
+  const result = await chrome.storage.local.get(PENDING_SCRAPE_KEY);
+  return result[PENDING_SCRAPE_KEY] ?? null;
+}
+
+async function runGoldScrape(tab, major) {
+  await chrome.tabs.sendMessage(tab.id, {
+    type: "RUN_GOLD_SCRAPE",
+    major
+  });
+
+  await clearPendingScrape();
+
+  return {
+    isLoggedIn: true,
+    needsLogin: false,
+    scrapeStarted: true
+  };
+}
+
+async function startGoldScrape(major) {
   const existingGoldTab = await findGoldTab();
 
   if (!existingGoldTab) {
+    await savePendingScrape(major);
+
     const newGoldTab = await chrome.tabs.create({
       url: GOLD_LOGIN_URL
     });
@@ -39,30 +74,52 @@ async function findOrOpenGoldLogin(major) {
       tab: newGoldTab,
       major,
       isLoggedIn: false,
-      needsLogin: true
+      needsLogin: true,
+      scrapeStarted: false
     };
   }
 
   const loginStatus = await getGoldLoginStatus(existingGoldTab);
 
   if (!loginStatus.isLoggedIn) {
+    await savePendingScrape(major);
     await focusTab(existingGoldTab);
+
+    return {
+      tab: existingGoldTab,
+      major,
+      isLoggedIn: false,
+      needsLogin: true,
+      scrapeStarted: false,
+      error: loginStatus.error
+    };
   }
 
-  return {
-    tab: existingGoldTab,
-    major,
-    isLoggedIn: loginStatus.isLoggedIn,
-    needsLogin: !loginStatus.isLoggedIn,
-    error: loginStatus.error
-  };
+  return runGoldScrape(existingGoldTab, major);
+}
+
+async function resumePendingGoldScrape(tab) {
+  const pendingScrape = await getPendingScrape();
+
+  if (!pendingScrape) {
+    return {
+      scrapeStarted: false
+    };
+  }
+
+  return runGoldScrape(tab, pendingScrape.major);
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type !== "START_GOLD_SCRAPE") {
-    return false;
+  if (message?.type === "START_GOLD_SCRAPE") {
+    startGoldScrape(message.major).then(sendResponse);
+    return true;
   }
 
-  findOrOpenGoldLogin(message.major).then(sendResponse);
-  return true;
+  if (message?.type === "GOLD_LOGIN_READY" && sender.tab?.id) {
+    resumePendingGoldScrape(sender.tab).then(sendResponse);
+    return true;
+  }
+
+  return false;
 });
