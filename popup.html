@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>UCSBPlat Helper</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 16px;
+        min-width: 240px;
+      }
+
+      label,
+      input,
+      button {
+        display: block;
+        width: 100%;
+      }
+
+      label {
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+
+      input {
+        box-sizing: border-box;
+        margin-bottom: 12px;
+        padding: 8px;
+      }
+
+      button {
+        cursor: pointer;
+        padding: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <label for="major">Major</label>
+    <input id="major" name="major" type="text" placeholder="Enter your major">
+    <button id="start">Start</button>
+    <p id="status" aria-live="polite"></p>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
