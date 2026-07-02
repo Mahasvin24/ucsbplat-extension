@@ -1,5 +1,5 @@
 const GOLD_URL_PATTERN = "https://my.sa.ucsb.edu/gold/*";
-const GOLD_LOGIN_URL = "https://my.sa.ucsb.edu/gold/";
+const GOLD_SCHEDULE_URL = "https://my.sa.ucsb.edu/gold/StudentSchedule.aspx";
 const PENDING_SCRAPE_KEY = "pendingGoldScrape";
 
 async function findGoldTab() {
@@ -31,7 +31,8 @@ async function getGoldLoginStatus(tab) {
 async function savePendingScrape(major) {
   await chrome.storage.local.set({
     [PENDING_SCRAPE_KEY]: {
-      major
+      major,
+      targetUrl: GOLD_SCHEDULE_URL
     }
   });
 }
@@ -60,6 +61,25 @@ async function runGoldScrape(tab, major) {
   };
 }
 
+function isScheduleTab(tab) {
+  return tab.url?.toLowerCase().startsWith(GOLD_SCHEDULE_URL.toLowerCase());
+}
+
+async function navigateToSchedule(tab, major) {
+  await savePendingScrape(major);
+
+  await chrome.tabs.update(tab.id, {
+    url: GOLD_SCHEDULE_URL
+  });
+
+  return {
+    isLoggedIn: true,
+    needsLogin: false,
+    scrapeStarted: false,
+    navigationStarted: true
+  };
+}
+
 async function startGoldScrape(major) {
   const existingGoldTab = await findGoldTab();
 
@@ -67,7 +87,7 @@ async function startGoldScrape(major) {
     await savePendingScrape(major);
 
     const newGoldTab = await chrome.tabs.create({
-      url: GOLD_LOGIN_URL
+      url: GOLD_SCHEDULE_URL
     });
 
     return {
@@ -95,6 +115,10 @@ async function startGoldScrape(major) {
     };
   }
 
+  if (!isScheduleTab(existingGoldTab)) {
+    return navigateToSchedule(existingGoldTab, major);
+  }
+
   return runGoldScrape(existingGoldTab, major);
 }
 
@@ -105,6 +129,10 @@ async function resumePendingGoldScrape(tab) {
     return {
       scrapeStarted: false
     };
+  }
+
+  if (!isScheduleTab(tab)) {
+    return navigateToSchedule(tab, pendingScrape.major);
   }
 
   return runGoldScrape(tab, pendingScrape.major);
