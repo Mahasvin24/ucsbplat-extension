@@ -16,6 +16,6 @@ async function scrapeSchedule() {
     throw new Error("Schedule container not found.");
   }
 
-  const scheduleHtml = scheduleContainer.outerHTML
-  return scheduleHtml;
+  const scheduleText = scheduleContainer.innerText
+  return scheduleText;
 }
