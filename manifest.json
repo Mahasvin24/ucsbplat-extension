@@ -2,9 +2,13 @@
   "manifest_version": 3,
   "name": "UCSBPlat Helper",
   "version": "1.0",
-  "description": "Scrapes GOLD and runs major progress check",
-  "permissions": ["scripting", "storage"],
-  "host_permissions": ["https://my.sa.ucsb.edu/gold/*"],
+  "description": "Syncs your GOLD schedule and major progress check to UCSBPlat",
+  "permissions": ["scripting", "storage", "cookies", "downloads"],
+  "host_permissions": [
+    "https://my.sa.ucsb.edu/gold/*",
+    "https://ucsbplat.com/*",
+    "http://localhost:12345/*"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"

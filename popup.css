@@ -20,6 +20,11 @@ h1 {
   margin: 0 0 4px;
 }
 
+.summary {
+  margin: 0 0 6px;
+  color: var(--muted);
+}
+
 .status {
   margin: 0 0 12px;
   min-height: 1.45em;
@@ -30,7 +35,29 @@ h1 {
   color: #c0392b;
 }
 
-button#run {
+.warnings {
+  margin: 0 0 12px;
+  padding-left: 16px;
+  color: #9a6400;
+}
+
+.confirm {
+  margin: 0 0 12px;
+  padding: 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, #c0392b 10%, transparent);
+}
+
+.confirm p {
+  margin: 0 0 8px;
+}
+
+.confirm button {
+  margin-right: 10px;
+}
+
+button#run,
+button#signin {
   width: 100%;
   padding: 8px;
   border: 0;
@@ -47,15 +74,25 @@ button#run:disabled {
   cursor: default;
 }
 
+button#signin {
+  margin-top: 8px;
+}
+
 .debug {
   display: flex;
-  gap: 8px;
-  align-items: baseline;
+  flex-direction: column;
+  gap: 5px;
   margin-top: 14px;
   padding-top: 10px;
   border-top: 1px solid var(--muted);
   font-size: 11px;
   color: var(--muted);
+}
+
+.debug label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 
 .link {

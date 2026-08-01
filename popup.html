@@ -6,13 +6,19 @@
   </head>
   <body>
     <h1>UCSBPlat</h1>
-    <p id="lastUpdate" class="last-update">Never updated</p>
+    <p id="lastUpdate" class="last-update">Never synced</p>
+    <p id="summary" class="summary" hidden></p>
     <p id="status" class="status"></p>
+    <ul id="warnings" class="warnings" hidden></ul>
+    <div id="confirm" class="confirm" hidden>
+      <p id="confirmMessage"></p>
+      <button id="confirmYes" type="button">Yes, change my major</button>
+      <button id="confirmNo" type="button" class="link">Cancel</button>
+    </div>
     <button id="run" type="button">Update my Course Data</button>
+    <button id="signin" type="button" hidden>Sign in to UCSBPlat</button>
     <div class="debug">
-      <span>Debug</span>
-      <button id="downloadSchedule" type="button" class="link" disabled>schedule.txt</button>
-      <button id="downloadProgress" type="button" class="link" disabled>progress-check.txt</button>
+      <label><input id="debugSave" type="checkbox" /> Save copies to Downloads</label>
     </div>
     <script src="popup.js" type="module"></script>
   </body>

@@ -1,58 +1,90 @@
+import { UCSBPLAT_ORIGIN } from "./config.js";
+
 const STALE_RUN_MS = 3 * 60 * 1000;
 
-const runButton = document.getElementById("run");
-const lastUpdateEl = document.getElementById("lastUpdate");
-const statusEl = document.getElementById("status");
-const downloads = {
-  scheduleHtml: document.getElementById("downloadSchedule"),
-  progressHtml: document.getElementById("downloadProgress"),
+const els = {
+  lastUpdate: document.getElementById("lastUpdate"),
+  summary: document.getElementById("summary"),
+  status: document.getElementById("status"),
+  warnings: document.getElementById("warnings"),
+  confirm: document.getElementById("confirm"),
+  confirmMessage: document.getElementById("confirmMessage"),
+  confirmYes: document.getElementById("confirmYes"),
+  confirmNo: document.getElementById("confirmNo"),
+  run: document.getElementById("run"),
+  signin: document.getElementById("signin"),
+  debugSave: document.getElementById("debugSave"),
 };
 
-runButton.addEventListener("click", async () => {
-  runButton.disabled = true;
-  const response = await chrome.runtime.sendMessage({ type: "START_SCRAPE" });
-  if (!response?.started) statusEl.textContent = "An update is already running.";
+els.run.addEventListener("click", async () => {
+  els.run.disabled = true;
+  const response = await chrome.runtime.sendMessage({ type: "START_SYNC" });
+  if (!response?.started) els.status.textContent = "An update is already running.";
 });
 
-downloads.scheduleHtml.addEventListener("click", () => download("scheduleHtml", "gold-schedule.txt"));
-downloads.progressHtml.addEventListener("click", () => download("progressHtml", "gold-progress-check.txt"));
+els.signin.addEventListener("click", () => chrome.tabs.create({ url: UCSBPLAT_ORIGIN }));
+els.confirmYes.addEventListener("click", () => chrome.runtime.sendMessage({ type: "CONFIRM_MAJOR_CHANGE" }));
+els.confirmNo.addEventListener("click", () => chrome.runtime.sendMessage({ type: "CANCEL_MAJOR_CHANGE" }));
+els.debugSave.addEventListener("change", () => chrome.storage.local.set({ debugSave: els.debugSave.checked }));
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && ("lastRun" in changes || "lastGood" in changes)) render();
+  if (area === "local" && ("lastRun" in changes || "lastSync" in changes || "pendingChange" in changes)) render();
 });
 
+// Opening the popup answers whatever the badge was asking for.
+chrome.action.setBadgeText({ text: "" });
 render();
 
 async function render() {
-  const { lastRun = {}, lastGood } = await chrome.storage.local.get(["lastRun", "lastGood"]);
+  const { lastRun = {}, lastSync, pendingChange, debugSave } = await chrome.storage.local.get([
+    "lastRun",
+    "lastSync",
+    "pendingChange",
+    "debugSave",
+  ]);
   const isRunning = lastRun.status === "running" && Date.now() - (lastRun.startedAt ?? 0) < STALE_RUN_MS;
 
-  lastUpdateEl.textContent = lastGood
-    ? `Last updated ${relativeTime(lastGood.capturedAt)} · ${formatTime(lastGood.capturedAt)}`
-    : "Never updated";
+  els.lastUpdate.textContent = lastSync
+    ? `Last synced ${relativeTime(lastSync.syncedAt)} · ${formatTime(lastSync.syncedAt)}`
+    : "Never synced";
+  setText(els.summary, lastSync ? describe(lastSync) : "");
 
-  statusEl.classList.toggle("error", lastRun.status === "error");
-  if (isRunning) statusEl.textContent = lastRun.step ?? "Working…";
-  else if (lastRun.status === "running") statusEl.textContent = "The last update was interrupted.";
-  else if (lastRun.status === "error") statusEl.textContent = lastRun.message ?? "Something went wrong.";
-  else if (lastRun.status === "success") statusEl.textContent = "Up to date.";
-  else statusEl.textContent = "";
+  els.status.classList.toggle("error", lastRun.status === "error" || lastRun.status === "signin");
+  if (isRunning) els.status.textContent = lastRun.step ?? "Working…";
+  else if (lastRun.status === "running") els.status.textContent = "The last update was interrupted.";
+  else if (lastRun.status === "error" || lastRun.status === "signin" || lastRun.status === "cancelled")
+    els.status.textContent = lastRun.message ?? "Something went wrong.";
+  else if (lastRun.status === "confirm") els.status.textContent = "";
+  else if (lastRun.status === "success") els.status.textContent = "Up to date.";
+  else els.status.textContent = "";
 
-  runButton.disabled = isRunning;
-  downloads.scheduleHtml.disabled = !lastGood;
-  downloads.progressHtml.disabled = !lastGood;
+  const warnings = lastRun.status === "success" ? lastSync?.warnings ?? [] : [];
+  els.warnings.replaceChildren(...warnings.map((text) => Object.assign(document.createElement("li"), { textContent: text })));
+  els.warnings.hidden = warnings.length === 0;
+
+  els.confirm.hidden = !pendingChange;
+  if (pendingChange) {
+    const codes = [pendingChange.storedCode, pendingChange.incomingCode].filter(Boolean);
+    els.confirmMessage.textContent = codes.length === 2
+      ? `${pendingChange.message} (stored ${codes[0]}, this check ${codes[1]})`
+      : pendingChange.message;
+  }
+
+  els.signin.hidden = lastRun.status !== "signin";
+  els.run.disabled = isRunning;
+  els.debugSave.checked = !!debugSave;
 }
 
-async function download(key, filename) {
-  const stored = await chrome.storage.local.get(key);
-  const html = stored[key];
-  if (!html) return;
-  const url = URL.createObjectURL(new Blob([html], { type: "text/plain" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
+function describe(sync) {
+  const student = sync.student ?? {};
+  const headline = [student.major_title, student.current_quarter ?? sync.quarter].filter(Boolean).join(" · ");
+  const counts = Object.entries(sync.counts ?? {}).map(([key, value]) => `${value} ${key.replace(/_/g, " ")}`);
+  return [headline, counts.join(", ")].filter(Boolean).join(" — ");
+}
+
+function setText(element, text) {
+  element.textContent = text;
+  element.hidden = !text;
 }
 
 function formatTime(timestamp) {

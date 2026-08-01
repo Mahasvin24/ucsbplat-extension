@@ -12,6 +12,14 @@ export function documentState(token) {
   };
 }
 
+export function scheduleState() {
+  const dropdown = document.querySelector("#ctl00_pageContent_quarterDropDown");
+  return {
+    found: !!dropdown,
+    quarter: dropdown?.selectedOptions[0]?.textContent.trim() || null,
+  };
+}
+
 export function dismissWelcomeLetter() {
   const button = document.querySelector("#pageContent_btnDeanLetterConfirm");
   if (!button || button.offsetParent === null) return { clicked: false };
@@ -54,7 +62,12 @@ export function domSize() {
   return document.getElementsByTagName("*").length;
 }
 
+// The degree audit encodes meaning in its exact column spacing, so the markup
+// is never reformatted — only whole elements the parser throws away are cut,
+// which drops roughly two thirds of the bytes.
 export function capturePage() {
   delete document.documentElement.dataset.ucsbplatRun;
-  return document.documentElement.outerHTML;
+  const clone = document.documentElement.cloneNode(true);
+  for (const node of clone.querySelectorAll("style, script, noscript, svg")) node.remove();
+  return clone.outerHTML;
 }
