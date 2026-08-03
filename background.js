@@ -45,8 +45,16 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   offerSync();
 });
 
-function isSchedulePage(url = "") {
-  return url.split(/[?#]/)[0].toLowerCase() === GOLD_SCHEDULE_URL.toLowerCase();
+// Only the schedule page itself, compared on origin + path so query strings and
+// fragments are ignored. GOLD's landing page (/gold/) deliberately does not match.
+function isSchedulePage(url) {
+  if (!url) return false;
+  try {
+    const { origin, pathname } = new URL(url);
+    return `${origin}${pathname}`.toLowerCase() === GOLD_SCHEDULE_URL.toLowerCase();
+  } catch {
+    return false;
+  }
 }
 
 async function offerSync() {
