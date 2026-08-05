@@ -78,13 +78,18 @@ server returned. Warnings are how the server says things like "that page contain
 | --- | --- |
 | `background.js` | Service worker: runs the sync, calls the API, handles every response |
 | `injected.js` | The functions injected into GOLD pages (click, poll, capture) |
-| `popup.*` | Status card, update button, major-change confirmation, debug row |
+| `popup.*` | Status card, update button, major-change confirmation, reminder setting |
+
+## Reminders
+
+Opening `/profile/home` on UCSBPlat with a sync more than 24 hours old re-opens this popup, since
+the site cannot refresh itself — only the extension can reach GOLD. It is throttled to once an
+hour so reloading a page does not keep interrupting, and **Remind me to update my course data** in
+the popup turns it off entirely until it is ticked again.
 
 ## Debugging
 
-**Save copies to Downloads** in the popup writes `gold-schedule.txt` and `gold-progress-check.txt`
-— exactly the bytes that were sent — on the next run. It is off by default and nothing is retained
-between runs. Service worker logs are behind the "service worker" link on `chrome://extensions`.
+Service worker logs are behind the "service worker" link on `chrome://extensions`.
 
 `sample-data/` holds saved copies of both GOLD pages used to pin down the element IDs. It is
 gitignored because it contains real academic records.

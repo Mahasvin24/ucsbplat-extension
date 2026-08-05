@@ -24,6 +24,13 @@ const UNREACHABLE = `Couldn't reach ${UCSBPLAT_HOST}. Check your connection and 
 
 const CONFIRM_TTL_MS = 10 * 60 * 1000;
 
+const PROFILE_HOME_URL = `${UCSBPLAT_ORIGIN}/profile/home`;
+// How old a sync has to be before visiting the profile is worth interrupting over.
+const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
+// Reloading the page or clicking back and forth should not re-open the popup each
+// time. A fresh visit an hour later still will.
+const REMINDER_COOLDOWN_MS = 60 * 60 * 1000;
+
 let running = false;
 
 // The captured HTML is the student's whole transcript. It is held here only
@@ -33,28 +40,68 @@ let awaitingConfirmation = null;
 class AuthError extends Error {}
 
 chrome.runtime.onInstalled.addListener(() => {
-  // An earlier build cached the captured transcript in extension storage.
-  chrome.storage.local.remove(["scheduleHtml", "progressHtml", "lastGood"]);
+  // An earlier build cached the captured transcript in extension storage, and a later
+  // one had a debug setting that wrote copies of it to Downloads. Both are gone; the
+  // leftover keys are cleared so nothing acts on them.
+  chrome.storage.local.remove(["scheduleHtml", "progressHtml", "lastGood", "debugSave"]);
 });
 
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   if (changeInfo.status !== "complete") return;
   // The sync's own tab is inactive, so only a tab the student is looking at
   // reaches this.
-  if (running || !tab.active || !isSchedulePage(tab.url)) return;
-  offerSync();
+  if (running || !tab.active) return;
+  // On GOLD's schedule page the data is right there to capture, so offer straight
+  // away. On the profile the offer is only worth making if what they are reading
+  // has actually gone stale.
+  if (isSchedulePage(tab.url)) offerSync();
+  else if (isProfileHomePage(tab.url)) maybeRemindToUpdate();
 });
+
+function matchesUrl(url, target) {
+  if (!url) return false;
+  try {
+    const { origin, pathname } = new URL(url);
+    return `${origin}${pathname}`.toLowerCase() === target.toLowerCase();
+  } catch {
+    return false;
+  }
+}
 
 // Only the schedule page itself, compared on origin + path so query strings and
 // fragments are ignored. GOLD's landing page (/gold/) deliberately does not match.
 function isSchedulePage(url) {
-  if (!url) return false;
-  try {
-    const { origin, pathname } = new URL(url);
-    return `${origin}${pathname}`.toLowerCase() === GOLD_SCHEDULE_URL.toLowerCase();
-  } catch {
-    return false;
-  }
+  return matchesUrl(url, GOLD_SCHEDULE_URL);
+}
+
+// Compared the same way, so the ?resume_calendar_sync=1 the calendar flow adds
+// still counts as the profile page.
+function isProfileHomePage(url) {
+  return matchesUrl(url, PROFILE_HOME_URL);
+}
+
+// Nudge a student whose profile is showing data a day or more out of date -- the
+// page cannot refresh itself, since only the extension can reach GOLD.
+async function maybeRemindToUpdate() {
+  const { lastSync, remindToUpdate, lastReminderAt = 0 } = await chrome.storage.local.get([
+    "lastSync",
+    "remindToUpdate",
+    "lastReminderAt",
+  ]);
+
+  // Undefined means the student has never touched the setting, and the reminder is
+  // the point of the extension -- only an explicit `false` turns it off.
+  if (remindToUpdate === false) return;
+  // Never synced at all: the profile has nothing on it to be stale, and the page
+  // already says so far more clearly than a popup could.
+  if (!lastSync?.syncedAt) return;
+
+  const now = Date.now();
+  if (now - lastSync.syncedAt < STALE_AFTER_MS) return;
+  if (now - lastReminderAt < REMINDER_COOLDOWN_MS) return;
+
+  await chrome.storage.local.set({ lastReminderAt: now });
+  await offerSync();
 }
 
 async function offerSync() {
@@ -128,8 +175,6 @@ async function runSync() {
     if (schedule.html && !auditPage) {
       warnings.push("Sent your schedule only — UCSBPlat kept the major and requirements it already had.");
     }
-
-    await saveDebugCopies(schedule.html, auditPage);
 
     await setRun({ step: "Sending to UCSBPlat…" });
     await submit(
@@ -318,27 +363,6 @@ async function reportFailure(error) {
     return;
   }
   await setRun({ status: "error", step: "", message: reason(error), finishedAt: Date.now() });
-}
-
-// Debugging aid only: off by default, and it writes exactly what was sent.
-async function saveDebugCopies(schedulePage, auditPage) {
-  const { debugSave } = await chrome.storage.local.get("debugSave");
-  if (!debugSave) return;
-  await Promise.all([
-    saveDebugCopy("gold-schedule.txt", schedulePage),
-    saveDebugCopy("gold-progress-check.txt", auditPage),
-  ]);
-}
-
-async function saveDebugCopy(filename, html) {
-  if (!html) return;
-  try {
-    const url = `data:text/plain;charset=utf-8,${encodeURIComponent(html)}`;
-    await chrome.downloads.download({ url, filename, saveAs: false });
-  } catch (error) {
-    // Never let a debugging aid fail the sync itself.
-    console.warn("Debug copy failed", filename, reason(error));
-  }
 }
 
 async function readJson(response) {

@@ -78,18 +78,13 @@ button#signin {
   margin-top: 8px;
 }
 
-.debug {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
+.settings {
   margin-top: 14px;
   padding-top: 10px;
   border-top: 1px solid var(--muted);
-  font-size: 11px;
-  color: var(--muted);
 }
 
-.debug label {
+.settings label {
   display: flex;
   gap: 6px;
   align-items: center;

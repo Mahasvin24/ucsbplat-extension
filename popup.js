@@ -13,7 +13,7 @@ const els = {
   confirmNo: document.getElementById("confirmNo"),
   run: document.getElementById("run"),
   signin: document.getElementById("signin"),
-  debugSave: document.getElementById("debugSave"),
+  remindToUpdate: document.getElementById("remindToUpdate"),
 };
 
 els.run.addEventListener("click", async () => {
@@ -25,7 +25,15 @@ els.run.addEventListener("click", async () => {
 els.signin.addEventListener("click", () => chrome.tabs.create({ url: UCSBPLAT_ORIGIN }));
 els.confirmYes.addEventListener("click", () => chrome.runtime.sendMessage({ type: "CONFIRM_MAJOR_CHANGE" }));
 els.confirmNo.addEventListener("click", () => chrome.runtime.sendMessage({ type: "CANCEL_MAJOR_CHANGE" }));
-els.debugSave.addEventListener("change", () => chrome.storage.local.set({ debugSave: els.debugSave.checked }));
+els.remindToUpdate.addEventListener("change", () => {
+  // Clearing the cooldown on the way back on means re-ticking the box takes effect
+  // on the next visit, rather than being swallowed by a reminder shown before it
+  // was switched off.
+  const enabled = els.remindToUpdate.checked;
+  chrome.storage.local.set(enabled
+    ? { remindToUpdate: true, lastReminderAt: 0 }
+    : { remindToUpdate: false });
+});
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && ("lastRun" in changes || "lastSync" in changes || "pendingChange" in changes)) render();
@@ -36,11 +44,11 @@ chrome.action.setBadgeText({ text: "" });
 render();
 
 async function render() {
-  const { lastRun = {}, lastSync, pendingChange, debugSave } = await chrome.storage.local.get([
+  const { lastRun = {}, lastSync, pendingChange, remindToUpdate } = await chrome.storage.local.get([
     "lastRun",
     "lastSync",
     "pendingChange",
-    "debugSave",
+    "remindToUpdate",
   ]);
   const isRunning = lastRun.status === "running" && Date.now() - (lastRun.startedAt ?? 0) < STALE_RUN_MS;
 
@@ -72,7 +80,9 @@ async function render() {
 
   els.signin.hidden = lastRun.status !== "signin";
   els.run.disabled = isRunning;
-  els.debugSave.checked = !!debugSave;
+  // On by default: only an explicit opt-out turns the reminder off, matching what
+  // background.js checks for.
+  els.remindToUpdate.checked = remindToUpdate !== false;
 }
 
 function describe(sync) {
