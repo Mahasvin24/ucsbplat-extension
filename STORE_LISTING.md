@@ -75,15 +75,14 @@ question a reviewer would otherwise open a rejection to ask.
 > attach the cookie" need different fixes, and without this the extension cannot tell the
 > student which one they are looking at.
 
-**Host permission — `https://my.sa.ucsb.edu/gold/*`**
+**Host permissions** (one field covering both, not one per host)
 
-> The two GOLD pages being synced live here: the student's schedule and their Major
-> Progress Check.
-
-**Host permission — `https://ucsbplat.com/*`**
-
-> Where the result is sent, and where the student's account lives. The extension posts the
-> synced pages to the UCSBPlat API and checks the student is signed in before it starts.
+> Two hosts, one for each half of the sync. `https://my.sa.ucsb.edu/gold/*` is where the
+> pages being synced live: the student's schedule and their Major Progress Check, read in
+> the GOLD session they are already signed in to. `https://ucsbplat.com/*` is where the
+> result goes and where the student's account lives — the extension checks they are signed
+> in there before it starts, then posts the two pages to the UCSBPlat API. No other host is
+> requested, and the extension does not run on any other site.
 
 ### Remote code
 
@@ -120,6 +119,37 @@ All three, consistent with the privacy policy:
 - I do not use or transfer user data to determine creditworthiness or for lending purposes
 
 ---
+
+## Settings page (not the Privacy practices tab)
+
+Two blockers live here instead, and they are easy to miss because every other requirement
+is on the Privacy tab:
+
+- **Publisher contact email** — an address you can actually receive at. It is shown
+  publicly on the listing.
+- **Verify that email** — Google sends a confirmation link and publishing stays blocked
+  until you click it.
+
+**Do this first.** Everything else on this page is copy-paste and takes a minute; the
+verification is a round-trip through your inbox, and there is no reason to discover that
+after the rest is done.
+
+---
+
+## Store images
+
+All three required images are in `store/` and `icons/`, and none of them ship inside the
+extension package — they are uploaded through the dashboard.
+
+| Dashboard field | File | Notes |
+| --- | --- | --- |
+| Store icon (128x128) | `icons/icon128.png` | 96x96 of artwork inside 16px padding, per Chrome's spec |
+| Small promo tile (440x280) | `store/promo-440x280.png` | |
+| Screenshot (1280x800) | `store/screenshot-1280x800.png` | |
+
+The screenshot is a real render of the popup: the extension's own `popup.css` and markup,
+captured in a browser, not a drawing of it. The record shown in it is invented. A listing
+image is public, and a real transcript is the one thing that must never be in one.
 
 ## Before uploading
 
