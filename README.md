@@ -20,7 +20,10 @@ storage, never logged, and is dropped as soon as the request finishes.
 
 `config.js` holds the origin every request and the sign-in link use. It points at
 `https://ucsbplat.com`; set `UCSBPLAT_ORIGIN` to `LOCAL_ORIGIN` to test against a local server
-instead. Both origins stay in `manifest.json`'s host permissions, so no other change is needed.
+instead, and add `"http://localhost:12345/*"` back to `manifest.json`'s `host_permissions` — it is
+not left there, because a published extension asking for access to a plain-http localhost port is a
+permission it can never use and one more thing for a Web Store reviewer to query. Undo both before
+packaging.
 
 Local testing does not fully stand in for production on the cookie question: Chrome treats
 `http://localhost` as a trustworthy origin, so a `Secure` cookie works there over plain HTTP. The
@@ -61,12 +64,10 @@ meaning in exact column spacing using non-breaking spaces.
 
 `chrome://extensions` → enable Developer mode → **Load unpacked** → pick this folder.
 
-## Using it
+To point it at a local UCSBPlat, swap `UCSBPLAT_ORIGIN` to `LOCAL_ORIGIN` in `config.js` **and** add
+`"http://localhost:12345/*"` back to `host_permissions` in `manifest.json`. Undo both before packaging.
 
-The popup opens on its own every time a `StudentSchedule.aspx` load completes in the tab the student
-is looking at — including the postbacks the quarter dropdown triggers. Chrome only allows an
-extension to open its own popup while its window is focused; when it refuses, the toolbar icon gets
-a badge instead.
+## Using it
 
 Sign in to ucsbplat.com and to GOLD, click the extension icon, then **Update my Course Data**. The
 popup shows progress while it runs, then the stored major, quarter and counts, plus any warnings the
@@ -82,10 +83,20 @@ server returned. Warnings are how the server says things like "that page contain
 
 ## Reminders
 
-Opening `/profile/home` on UCSBPlat with a sync more than 24 hours old re-opens this popup, since
-the site cannot refresh itself — only the extension can reach GOLD. It is throttled to once an
+Opening `/profile/home` on UCSBPlat with a sync more than 24 hours old opens this popup, since
+the site cannot refresh itself (only the extension can reach GOLD). It is throttled to once an
 hour so reloading a page does not keep interrupting, and **Remind me to update my course data** in
 the popup turns it off entirely until it is ticked again.
+
+That profile page is the *only* thing that opens the popup on its own. Being on GOLD does not:
+a student is usually there for something else, and syncing is a deliberate act via the toolbar
+icon. Chrome only allows an extension to open its own popup while its window is focused; when it
+refuses, the toolbar icon gets a badge instead.
+
+If the reminder never appears, the usual cause is that no sync has completed on this install
+(the reminder needs a stored `lastSync`, and extension storage is wiped when the extension's id
+changes — which happens when an unpacked build moves directory). Running one sync fixes it; the
+server is also asked directly as a fallback when local storage has nothing.
 
 ## Debugging
 

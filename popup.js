@@ -18,8 +18,15 @@ const els = {
 
 els.run.addEventListener("click", async () => {
   els.run.disabled = true;
-  const response = await chrome.runtime.sendMessage({ type: "START_SYNC" });
-  if (!response?.started) els.status.textContent = "An update is already running.";
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "START_SYNC" });
+    if (!response?.started) els.status.textContent = "An update is already running.";
+  } catch {
+    // sendMessage rejects if the service worker cannot be reached. Without this the
+    // button stays disabled with no message, and the only way out is closing the popup.
+    els.status.textContent = "Couldn't start the update. Try again.";
+    els.run.disabled = false;
+  }
 });
 
 els.signin.addEventListener("click", () => chrome.tabs.create({ url: UCSBPLAT_ORIGIN }));

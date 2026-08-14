@@ -25,17 +25,11 @@ const UNREACHABLE = `Couldn't reach ${UCSBPLAT_HOST}. Check your connection and 
 const CONFIRM_TTL_MS = 10 * 60 * 1000;
 
 const PROFILE_HOME_URL = `${UCSBPLAT_ORIGIN}/profile/home`;
-
-// TEMPORARY TEST MODE -- flip to true to check the profile reminder without waiting a
-// day, then flip back. It only shortens the two timers; every other rule is unchanged,
-// so what you see under it is what a stale profile does for real.
-const REMINDER_TEST_MODE = false;
-
 // How old a sync has to be before visiting the profile is worth interrupting over.
-const STALE_AFTER_MS = REMINDER_TEST_MODE ? 10_000 : 24 * 60 * 60 * 1000;
+const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 // Reloading the page or clicking back and forth should not re-open the popup each
 // time. A fresh visit an hour later still will.
-const REMINDER_COOLDOWN_MS = REMINDER_TEST_MODE ? 5_000 : 60 * 60 * 1000;
+const REMINDER_COOLDOWN_MS = 60 * 60 * 1000;
 
 let running = false;
 
@@ -52,35 +46,16 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.remove(["scheduleHtml", "progressHtml", "lastGood", "debugSave"]);
 });
 
-// TEMPORARY DIAGNOSTIC -- remove once the profile reminder is confirmed working.
-// console.log, not console.debug: DevTools hides debug behind the Verbose level.
-function diag(...args) {
-  console.log("[ucsbplat]", ...args);
-}
-
+// Being on GOLD is not itself a reason to interrupt: a student is usually there to do
+// something else, and the extension nagging on every visit is worse than being asked
+// for. Syncing from GOLD is a deliberate act now -- the toolbar icon. The profile is
+// the one place where the page is *showing* stale data, so that is where we speak up.
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   if (changeInfo.status !== "complete") return;
   // The sync's own tab is inactive, so only a tab the student is looking at
   // reaches this.
   if (running || !tab.active) return;
-
-  // TEMPORARY DIAGNOSTIC -- only for the two hosts that matter, to keep the noise down.
-  // A url of undefined here would mean the extension cannot see this tab at all, which
-  // is its own answer.
-  if (/ucsbplat\.com|my\.sa\.ucsb\.edu|localhost/.test(tab.url ?? "")) {
-    diag("tab complete", {
-      url: tab.url,
-      onGold: isSchedulePage(tab.url),
-      onProfile: isProfileHomePage(tab.url),
-      expectingProfile: PROFILE_HOME_URL,
-    });
-  }
-
-  // On GOLD's schedule page the data is right there to capture, so offer straight
-  // away. On the profile the offer is only worth making if what they are reading
-  // has actually gone stale.
-  if (isSchedulePage(tab.url)) offerSync();
-  else if (isProfileHomePage(tab.url)) maybeRemindToUpdate();
+  if (isProfileHomePage(tab.url)) maybeRemindToUpdate();
 });
 
 function matchesUrl(url, target) {
@@ -91,12 +66,6 @@ function matchesUrl(url, target) {
   } catch {
     return false;
   }
-}
-
-// Only the schedule page itself, compared on origin + path so query strings and
-// fragments are ignored. GOLD's landing page (/gold/) deliberately does not match.
-function isSchedulePage(url) {
-  return matchesUrl(url, GOLD_SCHEDULE_URL);
 }
 
 // Compared the same way, so the ?resume_calendar_sync=1 the calendar flow adds
@@ -116,22 +85,12 @@ async function maybeRemindToUpdate() {
   } = await chrome.storage.local.get(["lastSync", "remindToUpdate", "lastReminderAt", "lastSyncCheckAt"]);
 
   const now = Date.now();
-  // TEMPORARY DIAGNOSTIC -- logged before every guard, so an exit is never silent.
-  diag("reminder check", {
-    hasLocalSync: Boolean(lastSync?.syncedAt),
-    localAgeHours: lastSync?.syncedAt ? Math.round((now - lastSync.syncedAt) / 3_600_000) : null,
-    remindToUpdate,
-    minsSinceReminder: lastReminderAt ? Math.round((now - lastReminderAt) / 60_000) : null,
-    minsSinceServerCheck: lastSyncCheckAt ? Math.round((now - lastSyncCheckAt) / 60_000) : null,
-    staleAfterHours: STALE_AFTER_MS / 3_600_000,
-  });
-
   // Undefined means the student has never touched the setting, and the reminder is
   // the point of the extension -- only an explicit `false` turns it off.
-  if (remindToUpdate === false) return diag("stop: reminder toggle is off");
+  if (remindToUpdate === false) return;
 
   // Checked first so a reload costs neither a request nor a prompt.
-  if (now - lastReminderAt < REMINDER_COOLDOWN_MS) return diag("stop: within the reminder cooldown");
+  if (now - lastReminderAt < REMINDER_COOLDOWN_MS) return;
 
   let ageMs = lastSync?.syncedAt ? now - lastSync.syncedAt : null;
   if (ageMs === null) {
@@ -141,20 +100,15 @@ async function maybeRemindToUpdate() {
     // actually knows, so ask it rather than going quiet on a profile that really is
     // months stale. Throttled so a student who has genuinely never synced does not
     // cause a request on every page load.
-    if (now - lastSyncCheckAt < REMINDER_COOLDOWN_MS) return diag("stop: server was checked recently");
+    if (now - lastSyncCheckAt < REMINDER_COOLDOWN_MS) return;
     await chrome.storage.local.set({ lastSyncCheckAt: now });
     ageMs = await serverSyncAge();
   }
 
   // Null means we could not establish an age at all -- signed out, or never synced,
   // in which case the page already says so far more clearly than a popup could.
-  if (ageMs === null) return diag("stop: no sync age could be established");
-  if (ageMs < STALE_AFTER_MS) {
-    return diag("stop: not stale yet", { ageHours: Math.round(ageMs / 3_600_000) });
-  }
+  if (ageMs === null || ageMs < STALE_AFTER_MS) return;
 
-  // Opened before the write, so nothing sits between the decision and the popup that
-  // does not have to. See the note on offerSync's caller in the tab listener.
   await offerSync();
   await chrome.storage.local.set({ lastReminderAt: now });
 }
@@ -166,18 +120,13 @@ async function serverSyncAge() {
   try {
     const response = await fetch(PROGRESS_ENDPOINT, { credentials: "include" });
     // 401 signed out, 404 never synced: neither is a stale profile worth interrupting.
-    if (!response.ok) {
-      diag("server sync age: refused", { status: response.status, endpoint: PROGRESS_ENDPOINT });
-      return null;
-    }
+    if (!response.ok) return null;
     const { synced_seconds_ago: seconds } = await response.json();
     // A server that predates this field answers 200 with it missing, which reads as
-    // "cannot tell" rather than "fresh" -- so an undeployed server goes quiet, it does
-    // not guess.
-    diag("server sync age", { synced_seconds_ago: seconds ?? null, endpoint: PROGRESS_ENDPOINT });
+    // "cannot tell" rather than "fresh" -- so an older server goes quiet, it does not
+    // guess.
     return typeof seconds === "number" ? seconds * 1000 : null;
-  } catch (error) {
-    diag("server sync age: unreachable", error?.message ?? error);
+  } catch {
     return null;
   }
 }
@@ -185,12 +134,9 @@ async function serverSyncAge() {
 async function offerSync() {
   try {
     await chrome.action.openPopup();
-    console.debug("[ucsbplat] popup opened");
-  } catch (error) {
-    // TEMPORARY DIAGNOSTIC -- remove once the profile reminder is confirmed working.
+  } catch {
     // Chrome refuses this unless its window is focused, so fall back to a badge
     // rather than losing the prompt entirely.
-    console.warn("[ucsbplat] openPopup refused:", error?.message ?? error);
     await chrome.action.setBadgeText({ text: "•" });
     await chrome.action.setBadgeBackgroundColor({ color: "#003660" });
   }
