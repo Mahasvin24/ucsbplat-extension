@@ -68,13 +68,6 @@ question a reviewer would otherwise open a rejection to ask.
 > Remembers when the last sync happened, the result to show in the popup, and whether the
 > student wants update reminders. The captured GOLD pages are never stored here.
 
-**`cookies`**
-
-> Checks whether a UCSBPlat session cookie exists when a sync is rejected as
-> unauthenticated. "You are not signed in" and "you are signed in but your browser did not
-> attach the cookie" need different fixes, and without this the extension cannot tell the
-> student which one they are looking at.
-
 **Host permissions** (one field covering both, not one per host)
 
 > Two hosts, one for each half of the sync. `https://my.sa.ucsb.edu/gold/*` is where the
@@ -98,17 +91,17 @@ Tick, and nothing else:
 
 - **Website content** — the contents of the two GOLD pages (courses, grades, degree
   requirements, class times).
-- **Authentication information** — the UCSBPlat session cookie is checked to confirm the
-  student is signed in.
 
-Do **not** tick: personally identifiable information, health, financial and payment,
-personal communications, location, web history, or user activity. None are collected.
+Do **not** tick: personally identifiable information, authentication information, health,
+financial and payment, personal communications, location, web history, or user activity.
+None are collected.
 
-> Note on the first two: the GOLD pages do contain the student's name, and the sync is
-> attached to their account. It is disclosed under "website content" because that is the
-> category the page contents fall into, and the privacy policy spells out exactly what is
-> read and kept. If a reviewer queries it, the honest answer is that the name arrives as
-> part of the page content and is stored so the profile can address them by it.
+> Note, in case a reviewer asks: the GOLD pages are page contents and a student's name is
+> rendered on them, which is what "website content" covers and what the privacy policy
+> describes. Nothing pulls it out — the server parses courses and requirements and keeps
+> no name — so no personally identifiable information is collected as such. Authentication
+> is likewise nothing the extension handles: the request carries whatever session cookie
+> the browser already attaches, and the extension neither reads nor stores a cookie.
 
 ### Certifications
 

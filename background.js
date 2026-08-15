@@ -294,7 +294,7 @@ async function submit(payload, context, confirmMajorChange = false) {
     return;
   }
 
-  if (response.status === 401) throw await missingSessionError();
+  if (response.status === 401) throw missingSessionError();
 
   if (response.status === 403) {
     throw new Error(
@@ -365,22 +365,17 @@ async function requireSignedIn() {
     throw new Error(UNREACHABLE);
   }
   // 404 means signed in but never synced, which is fine — only 401 blocks us.
-  if (response.status === 401) throw await missingSessionError();
+  if (response.status === 401) throw missingSessionError();
 }
 
-async function missingSessionError() {
-  const cookies = await chrome.cookies.getAll({ domain: UCSBPLAT_HOST }).catch(() => []);
-  if (cookies.length === 0) {
-    const error = new AuthError(`Sign in to ${UCSBPLAT_HOST} with Google, then run the update again.`);
-    error.openSignIn = true;
-    return error;
-  }
-  // Cookies exist but none reached the server: a cross-site cookie needs
-  // SameSite=None; Secure, which Flask does not set by default.
-  return new AuthError(
-    `You're signed in to ${UCSBPLAT_HOST}, but Chrome didn't attach your session cookie to the extension's request. ` +
-      "The server has to mark that cookie SameSite=None; Secure, or hand out a pairing token instead.",
-  );
+// One message for every 401. Separating "never signed in" from "signed in, but Chrome
+// withheld the cookie" needed a count of the cookies on this host, and reading a
+// student's cookies is not worth the permission it costs. Offering the sign-in page
+// fixes the first case and does no harm in the second.
+function missingSessionError() {
+  const error = new AuthError(`Sign in to ${UCSBPLAT_HOST} with Google, then run the update again.`);
+  error.openSignIn = true;
+  return error;
 }
 
 async function reportFailure(error) {

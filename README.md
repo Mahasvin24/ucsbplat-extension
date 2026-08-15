@@ -44,9 +44,11 @@ can be allowed at once — or paste the published item's public key into `manife
 make the unpacked build use the published id.
 
 **Cross-site cookies.** Chrome only attaches a cookie to the extension's request if it is
-`SameSite=None; Secure`. If the sync reports being signed in but the cookie never arrives, the
-extension says so explicitly rather than hiding it — that is a server-side session-cookie change (or
-a pairing token), not something to work around here.
+`SameSite=None; Secure`. Every 401 is reported the same way — sign in and run it again — because
+telling a withheld cookie apart from a missing session needed a count of the cookies on the host,
+and the `cookies` permission that costs is not worth the better message at a Web Store review. If
+signing in does not clear it, suspect `SameSite` on the session cookie: that is a server-side change
+(or a pairing token), not something to work around here.
 
 **Major changes are confirmed, never assumed.** A what-if progress check for another major looks
 identical to a real one, so the server answers 409 `program_code_mismatch` and writes nothing. The
