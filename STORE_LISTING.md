@@ -42,6 +42,14 @@ The last paragraph is deliberate. The name and icon use UCSB's marks, and saying
 that this is a sponsored student project rather than a University service answers the
 question a reviewer would otherwise open a rejection to ask.
 
+"It runs only when you ask it to" is scoped to the thing that carries risk — reading GOLD —
+and the sentence straight after it says so outright. One thing does happen unprompted: a
+profile-page load can trigger `maybeRemindToUpdate()`, which checks the stored sync age
+(asking `/api/extension/progress` when local storage has none) and then opens the popup or
+sets a badge. That is the answer if a reviewer raises it. It never opens GOLD, reads no
+page, and sends nothing about the student — a nudge to click the button is not the
+scraping the claim is about.
+
 **Privacy policy URL:** `https://ucsbplat.com/privacy`
 
 ---
@@ -60,8 +68,11 @@ question a reviewer would otherwise open a rejection to ask.
 
 > Reads the two GOLD pages the student asked to sync. GOLD has no API, so the only way to
 > get a student's schedule and progress check is to read the pages themselves, in the
-> student's own signed-in session. The injected functions only click GOLD's own controls
-> and return page contents; they do not modify the pages.
+> student's own signed-in session. The injected functions click GOLD's own controls — tick
+> "use in-progress courses", run the progress check, expand all requirements — and return
+> the resulting HTML. They add no content to the page and change nothing else on it. The
+> only mark they leave is a single data attribute, set to tell one page load apart from the
+> next and removed again before the page is read.
 
 **`storage`**
 
@@ -146,11 +157,14 @@ image is public, and a real transcript is the one thing that must never be in on
 
 ## Before uploading
 
-1. `./package.sh` — must print `clean` and roughly 36K. It refuses to build if
+1. `./package.sh` — must print `clean` and roughly 32K. It refuses to build if
    `sample-data/` (real academic records) is in the archive.
 2. Confirm `manifest.json` has no `http://localhost` host permission and that
    `config.js` points at `HOSTED_ORIGIN`.
-3. Read <https://ucsbplat.com/privacy> against this file. Every disclosure here must be
-   true there.
+3. **Deploy the website first**, then read <https://ucsbplat.com/privacy> against this
+   file. Every disclosure here must be true *of the live site* — a reviewer reads the
+   deployed policy, not the repository. In particular the "no personally identifiable
+   information" answer below depends on the server having stopped parsing the student
+   name, which is a deploy, not a code change.
 4. The published extension gets a permanent ID different from the unpacked one. Add it to
    `EXTENSION_ID` on the server, or the API will answer 403 — see the README.
