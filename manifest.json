@@ -6,8 +6,15 @@
   "permissions": ["scripting", "storage"],
   "host_permissions": [
     "https://my.sa.ucsb.edu/gold/*",
-    "https://ucsbplat.com/*"
+    "https://ucsbplat.com/*",
+    "http://localhost:3000/*"
   ],
+  "externally_connectable": {
+    "matches": [
+      "https://ucsbplat.com/*",
+      "http://localhost:3000/*"
+    ]
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"

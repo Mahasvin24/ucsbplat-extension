@@ -11,6 +11,15 @@ set -euo pipefail
 cd "$(dirname "$0")"
 OUT="../ucsbplat-extension-$(python3 -c "import json;print(json.load(open('manifest.json'))['version'])").zip"
 
+# Local pages may talk to an unpacked development build, but the published extension
+# should never expose its command surface to whatever happens to be running on a user's
+# localhost. Keep this as a packaging failure instead of relying on a release checklist.
+if grep -q 'http://localhost' manifest.json ||
+   grep -q '^export const UCSBPLAT_ORIGIN = LOCAL_ORIGIN;' config.js; then
+  echo "REFUSING: extension is still configured for local development" >&2
+  exit 1
+fi
+
 FILES=(
   manifest.json
   background.js

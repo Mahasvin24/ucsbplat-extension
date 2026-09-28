@@ -1,11 +1,11 @@
 export const HOSTED_ORIGIN = "https://ucsbplat.com";
-export const LOCAL_ORIGIN = "http://localhost:12345";
+export const LOCAL_ORIGIN = "http://localhost:3000";
 
 // The origin every request and the sign-in link use.
 //
-// Testing against a local UCSBPlat takes two steps, not one: swap this to LOCAL_ORIGIN
-// *and* add "http://localhost:12345/*" back to host_permissions in manifest.json. It is
-// deliberately not left in the manifest, because a published extension asking for access
-// to a plain-http localhost port is a permission it can never use and one more thing for
-// a Web Store reviewer to ask about. Remember to undo both before packaging.
-export const UCSBPLAT_ORIGIN = HOSTED_ORIGIN;
+// Local testing uses three settings: swap this to LOCAL_ORIGIN and add the matching
+// localhost URL to both host_permissions and externally_connectable.matches. It is
+// deliberately not left in a release manifest, because a published extension asking for
+// plain-http localhost access is a permission it can never use. package.sh refuses to
+// build while any local-development setting remains.
+export const UCSBPLAT_ORIGIN = LOCAL_ORIGIN;

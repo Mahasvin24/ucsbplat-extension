@@ -19,11 +19,12 @@ storage, never logged, and is dropped as soon as the request finishes.
 ## Pointing at a server
 
 `config.js` holds the origin every request and the sign-in link use. It points at
-`https://ucsbplat.com`; set `UCSBPLAT_ORIGIN` to `LOCAL_ORIGIN` to test against a local server
-instead, and add `"http://localhost:12345/*"` back to `manifest.json`'s `host_permissions` — it is
-not left there, because a published extension asking for access to a plain-http localhost port is a
-permission it can never use and one more thing for a Web Store reviewer to query. Undo both before
-packaging.
+`https://ucsbplat.com`; set `UCSBPLAT_ORIGIN` to `LOCAL_ORIGIN` to test against a local server.
+Also add `"http://localhost:3000/*"` to both `manifest.json`'s `host_permissions` and
+`externally_connectable.matches`. These settings are not left in a release, because a published
+extension asking for plain-http localhost access is a permission it can never use and one more
+thing for a Web Store reviewer to query. Undo all three before packaging; `package.sh` refuses to
+build while any remains.
 
 Local testing does not fully stand in for production on the cookie question: Chrome treats
 `http://localhost` as a trustworthy origin, so a `Secure` cookie works there over plain HTTP. The
@@ -66,8 +67,9 @@ meaning in exact column spacing using non-breaking spaces.
 
 `chrome://extensions` → enable Developer mode → **Load unpacked** → pick this folder.
 
-To point it at a local UCSBPlat, swap `UCSBPLAT_ORIGIN` to `LOCAL_ORIGIN` in `config.js` **and** add
-`"http://localhost:12345/*"` back to `host_permissions` in `manifest.json`. Undo both before packaging.
+To point it at a local UCSBPlat, swap `UCSBPLAT_ORIGIN` to `LOCAL_ORIGIN` in `config.js` and add
+`"http://localhost:3000/*"` to both `host_permissions` and `externally_connectable.matches` in
+`manifest.json`. Undo all three before packaging.
 
 ## Using it
 
