@@ -1,4 +1,4 @@
-import { UCSBPLAT_ORIGIN } from "./config.js";
+import { HOSTED_ORIGIN, LOCAL_ORIGIN, UCSBPLAT_ORIGIN } from "./config.js";
 import {
   auditReadyState,
   capturePage,
@@ -21,6 +21,8 @@ const UCSBPLAT_HOST = new URL(UCSBPLAT_ORIGIN).hostname;
 const SYNC_ENDPOINT = `${UCSBPLAT_ORIGIN}/api/extension/gold-sync`;
 const PROGRESS_ENDPOINT = `${UCSBPLAT_ORIGIN}/api/extension/progress`;
 const UNREACHABLE = `Couldn't reach ${UCSBPLAT_HOST}. Check your connection and try again.`;
+const WEBSITE_ORIGINS = new Set([HOSTED_ORIGIN, LOCAL_ORIGIN]);
+const EXTERNAL_PROTOCOL_VERSION = 1;
 
 const CONFIRM_TTL_MS = 10 * 60 * 1000;
 
@@ -134,13 +136,50 @@ async function serverSyncAge() {
 async function offerSync() {
   try {
     await chrome.action.openPopup();
+    return true;
   } catch {
     // Chrome refuses this unless its window is focused, so fall back to a badge
     // rather than losing the prompt entirely.
-    await chrome.action.setBadgeText({ text: "•" });
-    await chrome.action.setBadgeBackgroundColor({ color: "#003660" });
+    try {
+      await chrome.action.setBadgeText({ text: "•" });
+      await chrome.action.setBadgeBackgroundColor({ color: "#003660" });
+    } catch {
+      // The website receives opened: false below, so failure to set the secondary
+      // indicator must not turn this into an unanswered external message.
+    }
+    return false;
   }
 }
+
+function isAllowedWebsiteSender(sender) {
+  try {
+    return WEBSITE_ORIGINS.has(new URL(sender.url).origin);
+  } catch {
+    return false;
+  }
+}
+
+// Public only to the exact website origins declared in manifest.json. Keep this protocol
+// deliberately smaller than the extension's internal message surface: a page may discover
+// the installed extension and ask Chrome to show its popup, but may not start a sync,
+// confirm a major change, or read any stored academic state.
+chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+  if (!isAllowedWebsiteSender(sender)) return;
+
+  if (message?.type === "UCSBPLAT_EXTENSION_PING") {
+    sendResponse({
+      ok: true,
+      protocolVersion: EXTERNAL_PROTOCOL_VERSION,
+      extensionVersion: chrome.runtime.getManifest().version,
+    });
+    return;
+  }
+
+  if (message?.type === "UCSBPLAT_OPEN_POPUP") {
+    offerSync().then((opened) => sendResponse({ ok: true, opened }));
+    return true;
+  }
+});
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "START_SYNC") {
