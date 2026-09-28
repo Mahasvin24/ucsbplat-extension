@@ -54,7 +54,7 @@ The published ID is `cffmlcefmeeeiidkdffgjimpjojiibap`.
 ## Pointing at a local server
 
 Three settings move together: set `UCSBPLAT_ORIGIN` to `LOCAL_ORIGIN` in `config.js`, add
-`"http://localhost:3000/*"` to `host_permissions`, and add it to
+`"http://localhost:12345/*"` to `host_permissions`, and add it to
 `externally_connectable.matches`. The localhost entries are deliberately not left in a release
 manifest — a published extension asking for plain-http localhost access is a permission it can
 never use and one more thing for a reviewer to query. **Undo all three before packaging.**

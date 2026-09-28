@@ -20,7 +20,7 @@ storage, never logged, and is dropped as soon as the request finishes.
 
 `config.js` holds the origin every request and the sign-in link use. It points at
 `https://ucsbplat.com`; set `UCSBPLAT_ORIGIN` to `LOCAL_ORIGIN` to test against a local server.
-Also add `"http://localhost:3000/*"` to both `manifest.json`'s `host_permissions` and
+Also add `"http://localhost:12345/*"` to both `manifest.json`'s `host_permissions` and
 `externally_connectable.matches`. These settings are not left in a release, because a published
 extension asking for plain-http localhost access is a permission it can never use and one more
 thing for a Web Store reviewer to query. Undo all three before packaging; `package.sh` refuses to
@@ -68,7 +68,7 @@ meaning in exact column spacing using non-breaking spaces.
 `chrome://extensions` → enable Developer mode → **Load unpacked** → pick this folder.
 
 To point it at a local UCSBPlat, swap `UCSBPLAT_ORIGIN` to `LOCAL_ORIGIN` in `config.js` and add
-`"http://localhost:3000/*"` to both `host_permissions` and `externally_connectable.matches` in
+`"http://localhost:12345/*"` to both `host_permissions` and `externally_connectable.matches` in
 `manifest.json`. Undo all three before packaging.
 
 ## Using it

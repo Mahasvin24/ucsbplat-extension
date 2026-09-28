@@ -7,12 +7,12 @@
   "host_permissions": [
     "https://my.sa.ucsb.edu/gold/*",
     "https://ucsbplat.com/*",
-    "http://localhost:3000/*"
+    "http://localhost:12345/*"
   ],
   "externally_connectable": {
     "matches": [
       "https://ucsbplat.com/*",
-      "http://localhost:3000/*"
+      "http://localhost:12345/*"
     ]
   },
   "background": {

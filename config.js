@@ -1,5 +1,5 @@
 export const HOSTED_ORIGIN = "https://ucsbplat.com";
-export const LOCAL_ORIGIN = "http://localhost:3000";
+export const LOCAL_ORIGIN = "http://localhost:12345";
 
 // The origin every request and the sign-in link use.
 //
