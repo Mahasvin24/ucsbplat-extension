@@ -1,7 +1,9 @@
 import { HOSTED_ORIGIN, LOCAL_ORIGIN, UCSBPLAT_ORIGIN } from "./config.js";
 import {
+  auditSelectionState,
   auditReadyState,
   capturePage,
+  chooseAuditOption,
   clickExpandAll,
   clickRunAudit,
   dismissWelcomeLetter,
@@ -22,7 +24,10 @@ const SYNC_ENDPOINT = `${UCSBPLAT_ORIGIN}/api/extension/gold-sync`;
 const PROGRESS_ENDPOINT = `${UCSBPLAT_ORIGIN}/api/extension/progress`;
 const UNREACHABLE = `Couldn't reach ${UCSBPLAT_HOST}. Check your connection and try again.`;
 const WEBSITE_ORIGINS = new Set([HOSTED_ORIGIN, LOCAL_ORIGIN]);
-const EXTERNAL_PROTOCOL_VERSION = 1;
+const EXTERNAL_PROTOCOL_VERSION = 2;
+const ACTION_SYNC_ALL = "sync_all";
+const ACTION_ADD_MAJOR = "add_major";
+const WEBSITE_ACTION_KEY = "pendingWebsiteAction";
 
 const CONFIRM_TTL_MS = 10 * 60 * 1000;
 
@@ -159,10 +164,9 @@ function isAllowedWebsiteSender(sender) {
   }
 }
 
-// Public only to the exact website origins declared in manifest.json. Keep this protocol
-// deliberately smaller than the extension's internal message surface: a page may discover
-// the installed extension and ask Chrome to show its popup, but may not start a sync,
-// confirm a major change, or read any stored academic state.
+// Public only to the exact website origins declared in manifest.json. The website may
+// prepare one known action and ask Chrome to show the confirmation popup, but it cannot
+// bypass that confirmation, start arbitrary work, or read extension storage.
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
   if (!isAllowedWebsiteSender(sender)) return;
 
@@ -179,6 +183,17 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
     offerSync().then((opened) => sendResponse({ ok: true, opened }));
     return true;
   }
+
+  if (message?.type === "UCSBPLAT_PREPARE_ACTION") {
+    if (message.action !== ACTION_ADD_MAJOR) {
+      sendResponse({ ok: false, error: "unsupported_action" });
+      return;
+    }
+    prepareWebsiteAction(message.action)
+      .then((opened) => sendResponse({ ok: true, opened }))
+      .catch(() => sendResponse({ ok: false, error: "could_not_prepare" }));
+    return true;
+  }
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -187,7 +202,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ started: false });
       return;
     }
-    start(runSync());
+    const action = message.action === ACTION_ADD_MAJOR ? ACTION_ADD_MAJOR : ACTION_SYNC_ALL;
+    chrome.storage.session.remove(WEBSITE_ACTION_KEY);
+    start(runSync(action));
     sendResponse({ started: true });
     return;
   }
@@ -211,40 +228,60 @@ function start(work) {
   });
 }
 
-async function runSync() {
+async function prepareWebsiteAction(action) {
+  await chrome.storage.session.set({
+    [WEBSITE_ACTION_KEY]: { type: action, requestedAt: Date.now() },
+  });
+  return offerSync();
+}
+
+async function runSync(action = ACTION_SYNC_ALL) {
   let tabId = null;
   try {
     await chrome.storage.local.remove("pendingChange");
     awaitingConfirmation = null;
     await setRun({
       status: "running",
+      action,
       step: "Checking your UCSBPlat sign-in…",
       message: "",
       startedAt: Date.now(),
       finishedAt: null,
     });
-    await requireSignedIn();
+    const profile = await requireSignedIn();
+    const savedSelection = profile?.student?.audit_selection ?? null;
 
     await setRun({ step: "Opening GOLD…" });
-    const tab = await chrome.tabs.create({ url: GOLD_SCHEDULE_URL, active: false });
+    const firstUrl = action === ACTION_ADD_MAJOR ? GOLD_AUDIT_URL : GOLD_SCHEDULE_URL;
+    const tab = await chrome.tabs.create({ url: firstUrl, active: false });
     tabId = tab.id;
-    await waitForDocument(tabId, "", "GOLD's schedule page didn't load in time.");
+    await waitForDocument(tabId, "", "GOLD didn't load in time.");
     await assertOnGold(tabId);
 
-    // Either page alone is worth sending, so neither capture aborts the run.
     const warnings = [];
-    const schedule = await captureSchedule(tabId, warnings);
-    const auditPage = await captureAudit(tabId, warnings);
-    if (!schedule.html && !auditPage) {
+    const schedule = action === ACTION_ADD_MAJOR
+      ? { html: null, quarter: null }
+      : await captureSchedule(tabId, warnings);
+    const audit = await captureAudit(
+      tabId,
+      warnings,
+      savedSelection,
+      action !== ACTION_ADD_MAJOR,
+    );
+    if (!schedule.html && !audit.html) {
       throw new Error("Couldn't capture either GOLD page. Try again in a minute.");
     }
-    if (schedule.html && !auditPage) {
+    if (schedule.html && !audit.html) {
       warnings.push("Sent your schedule only — UCSBPlat kept the major and requirements it already had.");
     }
 
     await setRun({ step: "Sending to UCSBPlat…" });
     await submit(
-      { schedule_page: schedule.html ?? "", major_progress_check: auditPage ?? "" },
+      {
+        schedule_page: schedule.html ?? "",
+        major_progress_check: audit.html ?? "",
+        ...(audit.selection ? { audit_selection: audit.selection } : {}),
+      },
       { quarter: schedule.quarter, warnings },
     );
   } catch (error) {
@@ -266,13 +303,17 @@ async function captureSchedule(tabId, warnings) {
   }
 }
 
-async function captureAudit(tabId, warnings) {
+async function captureAudit(tabId, warnings, savedSelection, navigateToAudit = true) {
   try {
-    await setRun({ step: "Opening the major progress check…" });
-    await navigate(tabId, GOLD_AUDIT_URL);
+    if (navigateToAudit) {
+      await setRun({ step: "Opening the major progress check…" });
+      await navigate(tabId, GOLD_AUDIT_URL);
+    }
 
     await setRun({ step: "Preparing the progress check…" });
     await dismissGate(tabId);
+    if (savedSelection) await restoreAuditSelection(tabId, savedSelection);
+    const selection = await readAuditSelection(tabId);
     const checkbox = await inject(tabId, ensureInProgressChecked);
     if (!checkbox.found) {
       throw new Error("the in-progress courses checkbox is missing");
@@ -295,11 +336,45 @@ async function captureAudit(tabId, warnings) {
     await waitForDomSettle(tabId);
 
     await setRun({ step: "Capturing the progress check…" });
-    return await inject(tabId, capturePage);
+    return { html: await inject(tabId, capturePage), selection };
   } catch (error) {
     warnings.push(`Couldn't run your major progress check (${reason(error)}).`);
-    return null;
+    return { html: null, selection: null };
   }
+}
+
+async function restoreAuditSelection(tabId, selection) {
+  await setRun({ step: "Selecting your saved major area…" });
+  await chooseAuditSelection(tabId, "major_area", selection.major_area);
+  await setRun({ step: "Selecting your saved major…" });
+  await chooseAuditSelection(tabId, "audit", selection.audit);
+}
+
+async function chooseAuditSelection(tabId, kind, option) {
+  if (!option?.value && !option?.label) {
+    throw new Error("UCSBPlat's saved major selection is incomplete");
+  }
+  const token = newToken();
+  await inject(tabId, markDocument, [token]);
+  const result = await inject(tabId, chooseAuditOption, [kind, option]);
+  if (!result.found) throw new Error("GOLD's major selection list is missing");
+  if (!result.matched) throw new Error("your saved major is no longer available in GOLD");
+  if (result.changed) {
+    await waitForDocument(tabId, token, "GOLD didn't finish changing the major selection.");
+    await dismissGate(tabId);
+  }
+}
+
+async function readAuditSelection(tabId) {
+  const selection = await inject(tabId, auditSelectionState);
+  if (!selection.found || !selection.majorArea.value || !selection.majorArea.label
+      || !selection.audit.value || !selection.audit.label) {
+    throw new Error("choose both your major area and major in GOLD first");
+  }
+  return {
+    major_area: { value: selection.majorArea.value, label: selection.majorArea.label },
+    audit: { value: selection.audit.value, label: selection.audit.label },
+  };
 }
 
 // The service worker — not the content script — makes this call so the browser
@@ -405,6 +480,8 @@ async function requireSignedIn() {
   }
   // 404 means signed in but never synced, which is fine — only 401 blocks us.
   if (response.status === 401) throw missingSessionError();
+  if (!response.ok) return null;
+  return readJson(response);
 }
 
 // One message for every 401. Separating "never signed in" from "signed in, but Chrome
