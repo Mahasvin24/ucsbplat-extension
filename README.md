@@ -5,16 +5,25 @@ of the courses a student has taken and is currently taking.
 ## What a sync does
 
 1. Checks the student is signed in to ucsbplat.com (`GET /api/extension/progress`). A 401 stops the
-   run before GOLD is ever opened.
+   run before GOLD is ever opened. If the student has synced before, the response also supplies
+   the two saved Major Progress Check selections.
 2. Opens `StudentSchedule.aspx` in a background tab and captures it, noting the selected quarter.
-3. Goes to `AcademicProgress.aspx`, ticks "use in-progress courses", clicks **Run This Progress
-   Check**, waits for the audit to render, clicks **Expand All**, and captures the page.
+3. Goes to `AcademicProgress.aspx`. For a returning student it selects the saved Major Area first,
+   waits for GOLD to repopulate the page, then selects the saved audit. It records both selected
+   values and labels, ticks "use in-progress courses", clicks **Run This Progress Check**, waits for
+   the audit to render, clicks **Expand All**, and captures the page.
 4. `POST`s both pages to `https://ucsbplat.com/api/extension/gold-sync` as
-   `{ schedule_page, major_progress_check }`, then closes the tab.
+   `{ schedule_page, major_progress_check, audit_selection }`, then closes the tab.
 
 Either page alone is still worth sending, so a failure on one is reported as a warning and the other
 is sent anyway. The captured HTML is the student's full transcript: it is never written to extension
 storage, never logged, and is dropped as soon as the request finishes.
+
+The website can also prepare the narrow `add_major` action during onboarding. The popup names the
+action and waits for the student to confirm it. That run skips the schedule, reads the Major Area and
+audit currently selected in GOLD, runs that progress check, and saves the selector pair with the
+audit. A website message can prepare and display this confirmation; it cannot start GOLD automation
+or read extension storage.
 
 ## Pointing at a server
 
@@ -73,9 +82,10 @@ To point it at a local UCSBPlat, swap `UCSBPLAT_ORIGIN` to `LOCAL_ORIGIN` in `co
 
 ## Using it
 
-Sign in to ucsbplat.com and to GOLD, click the extension icon, then **Update my Course Data**. The
-popup shows progress while it runs, then the stored major, quarter and counts, plus any warnings the
-server returned. Warnings are how the server says things like "that page contained no audit".
+During onboarding, run the progress check for your current major in GOLD, then choose **Add this
+major** on UCSBPlat and confirm the same action in the extension popup. For later full updates, click
+the extension icon and choose **Update my Course Data**. The popup shows progress while it runs, then
+the stored major, quarter and counts, plus any warnings the server returned.
 
 ## Files
 
@@ -83,7 +93,7 @@ server returned. Warnings are how the server says things like "that page contain
 | --- | --- |
 | `background.js` | Service worker: runs the sync, calls the API, handles every response |
 | `injected.js` | The functions injected into GOLD pages (click, poll, capture) |
-| `popup.*` | Status card, update button, major-change confirmation, reminder setting |
+| `popup.*` | Status card, website-action confirmation, update button, major-change confirmation, reminder setting |
 
 ## Reminders
 
@@ -92,10 +102,11 @@ the site cannot refresh itself (only the extension can reach GOLD). It is thrott
 hour so reloading a page does not keep interrupting, and **Remind me to update my course data** in
 the popup turns it off entirely until it is ticked again.
 
-That profile page is the *only* thing that opens the popup on its own. Being on GOLD does not:
-a student is usually there for something else, and syncing is a deliberate act via the toolbar
-icon. Chrome only allows an extension to open its own popup while its window is focused; when it
-refuses, the toolbar icon gets a badge instead.
+That profile page is the *only* thing that opens the popup without a click explicitly asking for an
+extension action. Onboarding may also open it after the student clicks **Add this major**. Being on
+GOLD does not: a student is usually there for something else. Chrome only allows an extension to
+open its own popup while its window is focused; when it refuses, the toolbar icon gets a badge
+instead.
 
 If the reminder never appears, the usual cause is that no sync has completed on this install
 (the reminder needs a stored `lastSync`, and extension storage is wiped when the extension's id

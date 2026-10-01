@@ -1,12 +1,18 @@
 import { UCSBPLAT_ORIGIN } from "./config.js";
 
 const STALE_RUN_MS = 3 * 60 * 1000;
+const WEBSITE_ACTION_TTL_MS = 10 * 60 * 1000;
+const ACTION_ADD_MAJOR = "add_major";
+const WEBSITE_ACTION_KEY = "pendingWebsiteAction";
+
+let preparedAction = null;
 
 const els = {
   lastUpdate: document.getElementById("lastUpdate"),
   summary: document.getElementById("summary"),
   status: document.getElementById("status"),
   warnings: document.getElementById("warnings"),
+  websiteAction: document.getElementById("websiteAction"),
   confirm: document.getElementById("confirm"),
   confirmMessage: document.getElementById("confirmMessage"),
   confirmYes: document.getElementById("confirmYes"),
@@ -19,7 +25,10 @@ const els = {
 els.run.addEventListener("click", async () => {
   els.run.disabled = true;
   try {
-    const response = await chrome.runtime.sendMessage({ type: "START_SYNC" });
+    const response = await chrome.runtime.sendMessage({
+      type: "START_SYNC",
+      action: preparedAction?.type,
+    });
     if (!response?.started) els.status.textContent = "An update is already running.";
   } catch {
     // sendMessage rejects if the service worker cannot be reached. Without this the
@@ -44,6 +53,7 @@ els.remindToUpdate.addEventListener("change", () => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && ("lastRun" in changes || "lastSync" in changes || "pendingChange" in changes)) render();
+  if (area === "session" && WEBSITE_ACTION_KEY in changes) render();
 });
 
 // Opening the popup answers whatever the badge was asking for.
@@ -51,12 +61,17 @@ chrome.action.setBadgeText({ text: "" });
 render();
 
 async function render() {
-  const { lastRun = {}, lastSync, pendingChange, remindToUpdate } = await chrome.storage.local.get([
-    "lastRun",
-    "lastSync",
-    "pendingChange",
-    "remindToUpdate",
+  const [local, session] = await Promise.all([
+    chrome.storage.local.get(["lastRun", "lastSync", "pendingChange", "remindToUpdate"]),
+    chrome.storage.session.get(WEBSITE_ACTION_KEY),
   ]);
+  const { lastRun = {}, lastSync, pendingChange, remindToUpdate } = local;
+  const pendingWebsiteAction = session[WEBSITE_ACTION_KEY];
+  preparedAction = pendingWebsiteAction?.type === ACTION_ADD_MAJOR
+      && Date.now() - pendingWebsiteAction.requestedAt < WEBSITE_ACTION_TTL_MS
+    ? pendingWebsiteAction
+    : null;
+  if (pendingWebsiteAction && !preparedAction) chrome.storage.session.remove(WEBSITE_ACTION_KEY);
   const isRunning = lastRun.status === "running" && Date.now() - (lastRun.startedAt ?? 0) < STALE_RUN_MS;
 
   els.lastUpdate.textContent = lastSync
@@ -70,8 +85,15 @@ async function render() {
   else if (lastRun.status === "error" || lastRun.status === "signin" || lastRun.status === "cancelled")
     els.status.textContent = lastRun.message ?? "Something went wrong.";
   else if (lastRun.status === "confirm") els.status.textContent = "";
+  else if (lastRun.status === "success" && lastRun.action === ACTION_ADD_MAJOR)
+    els.status.textContent = "Major added to UCSBPlat.";
   else if (lastRun.status === "success") els.status.textContent = "Up to date.";
   else els.status.textContent = "";
+
+  els.websiteAction.hidden = preparedAction?.type !== ACTION_ADD_MAJOR;
+  els.run.textContent = preparedAction?.type === ACTION_ADD_MAJOR
+    ? "Add this major"
+    : "Update my Course Data";
 
   const warnings = lastRun.status === "success" ? lastSync?.warnings ?? [] : [];
   els.warnings.replaceChildren(...warnings.map((text) => Object.assign(document.createElement("li"), { textContent: text })));

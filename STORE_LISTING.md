@@ -24,10 +24,10 @@ this file, `manifest.json`, and <https://ucsbplat.com/privacy>.
 > UCSBPlat Helper keeps your UCSBPlat course record in step with GOLD.
 >
 > UCSBPlat can show your degree progress and suggest courses to take next, but it has no
-> way to read GOLD on its own. This extension is that link. When you click "Update my
-> Course Data", it opens your GOLD schedule and Major Progress Check, reads them using
-> the GOLD session you are already signed in to, and sends the result to your UCSBPlat
-> account.
+> way to read GOLD on its own. This extension is that link. When you ask UCSBPlat to add
+> your selected major, or click "Update my Course Data", the extension shows the action
+> for confirmation, opens the relevant GOLD pages, reads them using the GOLD session you
+> are already signed in to, and sends the result to your UCSBPlat account.
 >
 > It runs only when you ask it to. It does not read GOLD in the background, does not run
 > on other websites, and never sees your GOLD password. The pages it reads are used once
@@ -68,16 +68,17 @@ scraping the claim is about.
 
 > Reads the two GOLD pages the student asked to sync. GOLD has no API, so the only way to
 > get a student's schedule and progress check is to read the pages themselves, in the
-> student's own signed-in session. The injected functions click GOLD's own controls — tick
-> "use in-progress courses", run the progress check, expand all requirements — and return
-> the resulting HTML. They add no content to the page and change nothing else on it. The
-> only mark they leave is a single data attribute, set to tell one page load apart from the
-> next and removed again before the page is read.
+> student's own signed-in session. The injected functions select the student's saved Major
+> Area and audit in order, tick "use in-progress courses", run the progress check, expand all
+> requirements, and return the resulting HTML. They add no content to the page and change
+> nothing else on it. The only mark they leave is a single data attribute, set to tell one
+> page load apart from the next and removed again before the page is read.
 
 **`storage`**
 
-> Remembers when the last sync happened, the result to show in the popup, and whether the
-> student wants update reminders. The captured GOLD pages are never stored here.
+> Remembers when the last sync happened, the result to show in the popup, whether the
+> student wants update reminders, and a short-lived website-requested action until the
+> student confirms it. The captured GOLD pages are never stored here.
 
 **Host permissions** (one field covering both, not one per host)
 

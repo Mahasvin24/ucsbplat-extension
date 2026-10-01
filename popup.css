@@ -41,6 +41,19 @@ h1 {
   color: #9a6400;
 }
 
+.website-action {
+  margin: 0 0 12px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, #003660 35%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, #003660 8%, transparent);
+}
+
+.website-action p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
 .confirm {
   margin: 0 0 12px;
   padding: 10px;
