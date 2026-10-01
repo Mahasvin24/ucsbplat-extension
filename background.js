@@ -259,15 +259,19 @@ async function runSync(action = ACTION_SYNC_ALL) {
     await assertOnGold(tabId);
 
     const warnings = [];
-    const schedule = action === ACTION_ADD_MAJOR
-      ? { html: null, quarter: null }
-      : await captureSchedule(tabId, warnings);
+    const scheduleFirst = action !== ACTION_ADD_MAJOR;
+    let schedule = { html: null, quarter: null };
+    if (scheduleFirst) schedule = await captureSchedule(tabId, warnings);
     const audit = await captureAudit(
       tabId,
       warnings,
       savedSelection,
-      action !== ACTION_ADD_MAJOR,
+      scheduleFirst,
     );
+    // Onboarding starts on the audit so GOLD keeps the student's chosen major.
+    // After trying it, visit My Schedule as well: the audit has course names
+    // but not the units, instructors, rooms, times, or sections shown on Home.
+    if (!scheduleFirst) schedule = await captureSchedule(tabId, warnings, true);
     if (!schedule.html && !audit.html) {
       throw new Error("Couldn't capture either GOLD page. Try again in a minute.");
     }
@@ -282,7 +286,7 @@ async function runSync(action = ACTION_SYNC_ALL) {
         major_progress_check: audit.html ?? "",
         ...(audit.selection ? { audit_selection: audit.selection } : {}),
       },
-      { quarter: schedule.quarter, warnings },
+      { quarter: schedule.quarter, warnings, action },
     );
   } catch (error) {
     await reportFailure(error);
@@ -291,14 +295,21 @@ async function runSync(action = ACTION_SYNC_ALL) {
   }
 }
 
-async function captureSchedule(tabId, warnings) {
+async function captureSchedule(tabId, warnings, navigateToSchedule = false) {
   try {
+    if (navigateToSchedule) {
+      await setRun({ step: "Opening your schedule…" });
+      await navigate(tabId, GOLD_SCHEDULE_URL);
+    }
     await setRun({ step: "Capturing your schedule…" });
+    // The Dean's Letter may still be covering the schedule on a first visit.
+    // Dismissing it is harmless when the audit already cleared it.
+    await dismissGate(tabId);
     const state = await inject(tabId, scheduleState);
     if (!state.found) throw new Error("the page didn't look like GOLD's schedule");
     return { html: await inject(tabId, capturePage), quarter: state.quarter };
   } catch (error) {
-    warnings.push(`Couldn't capture your schedule (${reason(error)}). UCSBPlat kept your stored enrollment.`);
+    warnings.push(`Couldn't capture your schedule (${reason(error)}). Schedule details weren't updated.`);
     return { html: null, quarter: null };
   }
 }
@@ -404,7 +415,11 @@ async function submit(payload, context, confirmMajorChange = false) {
         warnings: [...context.warnings, ...(data.warnings ?? [])],
       },
     });
-    await setRun({ status: "success", step: "", message: "", finishedAt: Date.now() });
+    const majorAdded = data.student?.program_code || data.student?.audit_selection?.audit?.value;
+    const message = context.action === ACTION_ADD_MAJOR && !majorAdded
+      ? "Your schedule was updated, but your major wasn't added. Try the progress check again."
+      : "";
+    await setRun({ status: "success", step: "", message, finishedAt: Date.now() });
     return;
   }
 

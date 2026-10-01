@@ -86,7 +86,7 @@ async function render() {
     els.status.textContent = lastRun.message ?? "Something went wrong.";
   else if (lastRun.status === "confirm") els.status.textContent = "";
   else if (lastRun.status === "success" && lastRun.action === ACTION_ADD_MAJOR)
-    els.status.textContent = "Major added to UCSBPlat.";
+    els.status.textContent = lastRun.message || "Major added to UCSBPlat.";
   else if (lastRun.status === "success") els.status.textContent = "Up to date.";
   else els.status.textContent = "";
 
