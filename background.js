@@ -147,11 +147,6 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
     return;
   }
 
-  if (message?.type === "UCSBPLAT_OPEN_POPUP") {
-    offerSync().then((opened) => sendResponse({ ok: true, opened }));
-    return true;
-  }
-
   if (message?.type === "UCSBPLAT_PREPARE_ACTION") {
     if (!WEBSITE_ACTIONS.has(message.action) || !/^[0-9a-f-]{36}$/.test(message.requestId ?? "")) {
       sendResponse({ ok: false, error: "unsupported_action" });

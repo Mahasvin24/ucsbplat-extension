@@ -14,7 +14,7 @@ function setup({getStatus = 200, action = 'add_major', postStatus = 200, resultS
   let tabExists = !missingTab;
   let shouldClose = closeAt;
   let shouldHang = hangAt;
-  const listeners = {};
+  const listeners = {updated: []};
   const calls = {popup: 0, tabs: 0, posts: [], selections: [], reports: []};
   const job = {request_id: requestId, action, status: 'pending', popup: {
     title: 'Website action title', detail: 'Website explanation', confirm_label: 'Website confirm label',
@@ -36,6 +36,7 @@ function setup({getStatus = 200, action = 'add_major', postStatus = 200, resultS
     },
     storage: {local: makeStorage('local'), session: makeStorage('session')},
     tabs: {
+      onUpdated: {addListener: (fn) => listeners.updated.push(fn)},
       onRemoved: {addListener: (fn) => { listeners.removed = fn; }},
       create: async () => { calls.tabs++; tabExists = true; return {id: 1}; }, update: async () => {},
       get: async () => {
@@ -146,6 +147,18 @@ async function popupScenario(initialState) {
 }
 (async () => {
   let s = setup(); let reply;
+  s.storage.local.lastSync = {syncedAt: Date.now() - 3 * 86400000};
+  for (const url of ['https://ucsbplat.com/profile/', 'https://ucsbplat.com/profile/home',
+    'http://localhost:12345/profile/home', 'https://my.sa.ucsb.edu/gold/StudentSchedule.aspx']) {
+    for (const listener of s.listeners.updated) listener(99, {status: 'complete'}, {active: true, url});
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+  check(s.calls.popup === 0 && s.calls.tabs === 0, 'loading profile or GOLD pages never opens popup or starts automation, even with stale legacy sync data');
+  s.listeners.external({type: 'UCSBPLAT_EXTENSION_PING'}, {url: 'https://ucsbplat.com'}, () => {});
+  check(s.calls.popup === 0, 'website extension detection never opens popup');
+  s.listeners.external({type: 'UCSBPLAT_OPEN_POPUP'}, {url: 'https://ucsbplat.com'}, (r) => { reply = r; });
+  check(reply === undefined && s.calls.popup === 0, 'legacy popup-only command cannot open popup');
+  s = setup();
   s.listeners.external({type: 'UCSBPLAT_PREPARE_ACTION', action: 'add_major', requestId}, {url: 'https://evil.example'}, (r) => { reply = r; });
   check(reply === undefined && !s.storage.session.pendingWebsiteAction, 'untrusted origin rejected');
   s.listeners.external({type: 'UCSBPLAT_PREPARE_ACTION', action: 'arbitrary', requestId}, {url: 'https://ucsbplat.com'}, (r) => { reply = r; });
