@@ -6,28 +6,20 @@
   </head>
   <body>
     <h1>UCSBPlat</h1>
-    <p id="lastUpdate" class="last-update">Never synced</p>
-    <p id="summary" class="summary" hidden></p>
-    <p id="status" class="status"></p>
-    <ul id="warnings" class="warnings" hidden></ul>
+    <p id="intro">Use ucsbplat.com to choose what you'd like to do.</p>
     <div id="websiteAction" class="website-action" hidden>
-      <strong id="websiteActionTitle">Add your selected major?</strong>
+      <strong id="websiteActionTitle"></strong>
       <p id="websiteActionDetail"></p>
-      <button id="cancelWebsiteAction" type="button" class="link">Cancel</button>
     </div>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
     <div id="confirm" class="confirm" hidden>
       <p id="confirmMessage"></p>
-      <button id="confirmYes" type="button">Yes, change my major</button>
+      <button id="confirmYes" type="button">Confirm change</button>
       <button id="confirmNo" type="button" class="link">Cancel</button>
     </div>
-    <button id="run" type="button">Update my Course Data</button>
-    <button id="signin" type="button" hidden>Sign in to UCSBPlat</button>
-    <div class="settings">
-      <label>
-        <input id="remindToUpdate" type="checkbox" checked />
-        Remind me to update my course data
-      </label>
-    </div>
+    <button id="run" type="button" hidden>Continue</button>
+    <button id="cancelWebsiteAction" type="button" class="link" hidden>Cancel</button>
+    <button id="website" type="button">Open UCSBPlat</button>
     <script src="popup.js" type="module"></script>
   </body>
 </html>

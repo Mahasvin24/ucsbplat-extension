@@ -4,6 +4,9 @@ of the courses a student has taken and is currently taking.
 
 ## What a sync does
 
+Every run starts with an action on the UCSBPlat website and confirmation in the extension.
+Opening the toolbar popup directly links to your profile; it cannot start a standalone sync.
+
 1. Checks the student is signed in to ucsbplat.com (`GET /api/extension/session`). A 401 stops the
    run before GOLD is ever opened. If the student has synced before, the response also supplies
    the two saved Major Progress Check selections.
@@ -27,12 +30,13 @@ or another major. Refresh-major restores the saved selectors for the requested m
 normal full updates restore the primary major's selectors.
 
 The website decides the saved result. A successful response includes `status: success`
-or `partial`, the database timestamp, stored summary/counts, and warnings. Both the popup
-and website display that result. The extension reports running/failure/cancellation to the
+or `partial`, the database timestamp, stored summary/counts, and warnings. The website displays the detailed result. The popup shows only the website's action text,
+a simple running message, and the final server message. It has no sync history, counts,
+warnings list, or reminder settings. The extension reports running/failure/cancellation to the
 same account-scoped request; it cannot declare a save successful itself. Prepared actions
 can be cancelled in the popup. No captured HTML is written to extension storage.
 
-Protocol v3 requires extension v1.2 and the corresponding website changes. A website message
+Protocol v4 requires extension v1.3 and the corresponding website changes. A website message
 cannot start GOLD automation or read extension storage. Status receipts contain no captured
 HTML, expire on the server after 15 minutes, and are erased with course-data deletion.
 
@@ -73,11 +77,11 @@ signing in does not clear it, suspect `SameSite` on the session cookie: that is 
 
 **Major changes are confirmed, never assumed.** A what-if progress check for another major looks
 identical to a real one, so the server answers 409 `program_code_mismatch` and writes nothing. The
-popup shows both program codes and asks. Only if the student confirms is the same payload resent
+popup shows the website's explanation and asks. Only if the student confirms is the same payload resent
 with `confirm_major_change: true`.
 
 **The quarter is whatever GOLD had selected.** The run opens a fresh schedule page, so this is
-GOLD's default quarter, and the popup shows which one was stored.
+GOLD's default quarter. The website shows which one was stored.
 
 **Pages are trimmed, never rewritten.** Only `style`, `script`, `noscript` and `svg` elements are
 removed — about 1.75 MB drops to ~0.55 MB. Nothing is reformatted, because the degree audit encodes
@@ -94,36 +98,31 @@ To point it at a local UCSBPlat, swap `UCSBPLAT_ORIGIN` to `LOCAL_ORIGIN` in `co
 ## Using it
 
 During onboarding, run the progress check for your current major in GOLD, then choose **Add this
-major** on UCSBPlat and confirm the same action in the extension popup. For later full updates, click
-the extension icon and choose **Update my Course Data**. The popup shows progress while it runs, then
-the server-confirmed stored major, quarter and counts, plus any warnings. The website
-updates when that request completes; failures and cancellations stop its waiting state.
+major** on UCSBPlat and confirm in the extension popup. For later updates, choose **Update my
+Course Data** or **Refresh this major** on the website and confirm the requested action.
+Keep the automation tab open until the update finishes. Use your profile for saved details.
+
+Closing the GOLD tab during capture stops the run, reports an error to the website, and releases
+the worker so a new website request can start. It must never turn a user-closed tab into a
+schedule-only save. Closing the tab after submission does not undo a committed server save.
+The tab-removal event also interrupts an outstanding injection even if Chrome never resolves
+its promise. Website calls have timeouts so a network stall cannot hold the run lock forever.
+
+If the service worker restarts during a run or major-change confirmation, reopening the popup
+or preparing another website action reconciles the stored request with the server. A committed
+success is preserved; otherwise the interrupted request fails and can be retried from the website.
+Captured pages cannot survive a worker restart and are never restored from storage.
+
+Chrome may refuse to open the popup automatically. The website then asks the student to click
+the toolbar icon; the already-prepared action appears there. No profile-visit reminders open it.
 
 ## Files
 
 | File | Role |
 | --- | --- |
-| `background.js` | Service worker: runs the sync, calls the API, handles every response |
-| `injected.js` | The functions injected into GOLD pages (click, poll, capture) |
-| `popup.*` | Status card, website-action confirmation, update button, major-change confirmation, reminder setting |
-
-## Reminders
-
-Opening `/profile/home` on UCSBPlat with a sync more than 24 hours old opens this popup, since
-the site cannot refresh itself (only the extension can reach GOLD). It is throttled to once an
-hour so reloading a page does not keep interrupting, and **Remind me to update my course data** in
-the popup turns it off entirely until it is ticked again.
-
-That profile page is the *only* thing that opens the popup without a click explicitly asking for an
-extension action. Onboarding may also open it after the student clicks **Add this major**. Being on
-GOLD does not: a student is usually there for something else. Chrome only allows an extension to
-open its own popup while its window is focused; when it refuses, the toolbar icon gets a badge
-instead.
-
-If the reminder never appears, the usual cause is that no sync has completed on this install
-(the reminder needs a stored `lastSync`, and extension storage is wiped when the extension's id
-changes — which happens when an unpacked build moves directory). Running one sync fixes it; the
-server is also asked directly as a fallback when local storage has nothing.
+| `background.js` | Service worker: validates website requests, runs automation, reports status |
+| `injected.js` | Self-contained functions injected into GOLD pages |
+| `popup.*` | Website link, server-supplied confirmation/status, major-change confirmation |
 
 ## Debugging
 
@@ -135,9 +134,10 @@ gitignored because it contains real academic records.
 ## Verification
 
 `node check.cjs` drives the real service worker with synthetic Chrome and HTTP stubs. It
-checks origin/action restrictions, confirmation, request propagation, selected-major
-restoration, partial/failure results, cancellation, reminder guards, and that captured HTML
-never reaches storage. `node --check background.js && node --check popup.js` checks syntax.
+checks website-only initiation, server-supplied popup copy, selected-major restoration,
+partial/failure results, closure during each capture phase, stuck-injection interruption,
+worker restart, network timeouts, retry, confirmation races, and that captured HTML never
+reaches storage. `node --check background.js && node --check popup.js` checks syntax.
 
 For release verification, use a temporary release copy, restore hosted configuration,
 remove localhost from both manifest lists, and run `./package.sh`. Keep the development

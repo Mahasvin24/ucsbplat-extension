@@ -16,15 +16,6 @@ h1 {
   letter-spacing: 0.02em;
 }
 
-.last-update {
-  margin: 0 0 4px;
-}
-
-.summary {
-  margin: 0 0 6px;
-  color: var(--muted);
-}
-
 .status {
   margin: 0 0 12px;
   min-height: 1.45em;
@@ -33,12 +24,6 @@ h1 {
 
 .status.error {
   color: #c0392b;
-}
-
-.warnings {
-  margin: 0 0 12px;
-  padding-left: 16px;
-  color: #9a6400;
 }
 
 .website-action {
@@ -70,7 +55,7 @@ h1 {
 }
 
 button#run,
-button#signin {
+button#website {
   width: 100%;
   padding: 8px;
   border: 0;
@@ -87,20 +72,8 @@ button#run:disabled {
   cursor: default;
 }
 
-button#signin {
+button#website {
   margin-top: 8px;
-}
-
-.settings {
-  margin-top: 14px;
-  padding-top: 10px;
-  border-top: 1px solid var(--muted);
-}
-
-.settings label {
-  display: flex;
-  gap: 6px;
-  align-items: center;
 }
 
 .link {
@@ -118,3 +91,5 @@ button#signin {
   cursor: default;
   text-decoration: none;
 }
+
+#cancelWebsiteAction { margin-top: 8px; }

@@ -25,7 +25,7 @@ this file, `manifest.json`, and <https://ucsbplat.com/privacy>.
 >
 > UCSBPlat can show your degree progress and suggest courses to take next, but it has no
 > way to read GOLD on its own. This extension is that link. When you ask UCSBPlat to add
-> your selected major, or click "Update my Course Data", the extension shows the action
+> your selected major, or click "Update my Course Data" on your profile, the extension shows the action
 > for confirmation, opens the relevant GOLD pages, reads them using the GOLD session you
 > are already signed in to, and sends the result to your UCSBPlat account.
 >
@@ -42,13 +42,9 @@ The last paragraph is deliberate. The name and icon use UCSB's marks, and saying
 that this is a sponsored student project rather than a University service answers the
 question a reviewer would otherwise open a rejection to ask.
 
-"It runs only when you ask it to" is scoped to the thing that carries risk — reading GOLD —
-and the sentence straight after it says so outright. One thing does happen unprompted: a
-profile-page load can trigger `maybeRemindToUpdate()`, which checks the stored sync age
-(asking `/api/extension/progress` when local storage has none) and then opens the popup or
-sets a badge. That is the answer if a reviewer raises it. It never opens GOLD, reads no
-page, and sends nothing about the student — a nudge to click the button is not the
-scraping the claim is about.
+All syncs begin on the UCSBPlat website. Opening the toolbar popup directly directs the
+student there. The popup displays the website's requested action and simple status;
+saved course details and warnings appear on the website. No reminders open the popup.
 
 **Privacy policy URL:** `https://ucsbplat.com/privacy`
 
@@ -76,9 +72,10 @@ scraping the claim is about.
 
 **`storage`**
 
-> Remembers when the last sync happened, the result to show in the popup, whether the
-> student wants update reminders, and a short-lived website-requested action until the
-> student confirms it. The captured GOLD pages are never stored here.
+> Holds the website-requested action and its confirmation text, current run status, and
+> a pending major-change confirmation. This lets the popup resume an active action and
+> reconcile an interrupted worker with the website. The captured GOLD pages and detailed
+> sync history are never stored here.
 
 **Host permissions** (one field covering both, not one per host)
 
@@ -170,11 +167,13 @@ image is public, and a real transcript is the one thing that must never be in on
 4. The published extension gets a permanent ID different from the unpacked one. Add it to
    `EXTENSION_ID` on the server, or the API will answer 403 — see the README.
 
-## Website actions (v1.2)
+## Website actions (v1.3 / protocol v4)
 
 Website-initiated add-major, full-update, and selected-major-refresh actions use an
 account-scoped server request and require confirmation in the extension popup. The server
-returns the saved result; the website can also display failure and cancellation. These
+supplies the popup confirmation and running copy and returns the saved result. The website
+shows detailed results, failure, and cancellation. The toolbar popup cannot start a sync
+without a valid website request, and closing the GOLD tab ends capture with a retryable error. These
 actions collect the same two GOLD pages and academic fields described above, add no
 permissions, and never store captured HTML. Deploy the updated privacy policy before
 submitting this release. `check.cjs` is a development harness and is excluded by `package.sh`.

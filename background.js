@@ -24,7 +24,7 @@ const SYNC_ENDPOINT = `${UCSBPLAT_ORIGIN}/api/extension/gold-sync`;
 const PROGRESS_ENDPOINT = `${UCSBPLAT_ORIGIN}/api/extension/session`;
 const UNREACHABLE = `Couldn't reach ${UCSBPLAT_HOST}. Check your connection and try again.`;
 const WEBSITE_ORIGINS = new Set([HOSTED_ORIGIN, LOCAL_ORIGIN]);
-const EXTERNAL_PROTOCOL_VERSION = 3;
+const EXTERNAL_PROTOCOL_VERSION = 4;
 const ACTION_SYNC_ALL = "sync_all";
 const ACTION_ADD_MAJOR = "add_major";
 const ACTION_REFRESH_MAJOR = "refresh_major";
@@ -34,111 +34,76 @@ const WEBSITE_ACTION_KEY = "pendingWebsiteAction";
 
 const CONFIRM_TTL_MS = 10 * 60 * 1000;
 
-const PROFILE_HOME_URL = `${UCSBPLAT_ORIGIN}/profile/home`;
-// How old a sync has to be before visiting the profile is worth interrupting over.
-const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
-// Reloading the page or clicking back and forth should not re-open the popup each
-// time. A fresh visit an hour later still will.
-const REMINDER_COOLDOWN_MS = 60 * 60 * 1000;
-
 let running = false;
+let preparing = false;
+let automationTabId = null;
+let automationTabClosed = false;
+let automationController = null;
+let recovery = null;
 
-// The captured HTML is the student's whole transcript. It is held here only
-// while a major-change confirmation is outstanding, and dropped right after.
+// Captured pages exist only in memory while the website asks for confirmation.
 let awaitingConfirmation = null;
 
 class AuthError extends Error {}
+class AutomationTabClosedError extends Error {
+  constructor() {
+    super("The GOLD tab was closed. Start a new update from your UCSBPlat profile.");
+  }
+}
 
 chrome.runtime.onInstalled.addListener(() => {
-  // An earlier build cached the captured transcript in extension storage, and a later
-  // one had a debug setting that wrote copies of it to Downloads. Both are gone; the
-  // leftover keys are cleared so nothing acts on them.
-  chrome.storage.local.remove(["scheduleHtml", "progressHtml", "lastGood", "debugSave"]);
+  chrome.storage.local.remove([
+    "scheduleHtml", "progressHtml", "lastGood", "debugSave", "lastSync",
+    "remindToUpdate", "lastReminderAt", "lastSyncCheckAt",
+  ]);
 });
 
-// Being on GOLD is not itself a reason to interrupt: a student is usually there to do
-// something else, and the extension nagging on every visit is worse than being asked
-// for. Syncing from GOLD is a deliberate act now -- the toolbar icon. The profile is
-// the one place where the page is *showing* stale data, so that is where we speak up.
-chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
-  if (changeInfo.status !== "complete") return;
-  // The sync's own tab is inactive, so only a tab the student is looking at
-  // reaches this.
-  if (running || !tab.active) return;
-  if (isProfileHomePage(tab.url)) maybeRemindToUpdate();
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId === automationTabId) {
+    automationTabClosed = true;
+    automationController?.abort();
+  }
 });
 
-function matchesUrl(url, target) {
-  if (!url) return false;
+function throwIfTabClosed() {
+  if (automationTabClosed) throw new AutomationTabClosedError();
+}
+
+async function whileTabOpen(work) {
+  const signal = automationController.signal;
+  let onClosed;
   try {
-    const { origin, pathname } = new URL(url);
-    return `${origin}${pathname}`.toLowerCase() === target.toLowerCase();
-  } catch {
-    return false;
+    return await Promise.race([work, new Promise((_resolve, reject) => {
+      onClosed = () => reject(new AutomationTabClosedError());
+      if (signal.aborted) { onClosed(); return; }
+      signal.addEventListener("abort", onClosed, { once: true });
+    })]);
+  } finally {
+    signal.removeEventListener("abort", onClosed);
   }
 }
 
-// Compared the same way, so the ?resume_calendar_sync=1 the calendar flow adds
-// still counts as the profile page.
-function isProfileHomePage(url) {
-  return matchesUrl(url, PROFILE_HOME_URL);
+function ensureRecovered() {
+  recovery ??= recoverInterruptedRun();
+  return recovery;
 }
 
-// Nudge a student whose profile is showing data a day or more out of date -- the
-// page cannot refresh itself, since only the extension can reach GOLD.
-async function maybeRemindToUpdate() {
-  const {
-    lastSync,
-    remindToUpdate,
-    lastReminderAt = 0,
-    lastSyncCheckAt = 0,
-  } = await chrome.storage.local.get(["lastSync", "remindToUpdate", "lastReminderAt", "lastSyncCheckAt"]);
-
-  const now = Date.now();
-  // Undefined means the student has never touched the setting, and the reminder is
-  // the point of the extension -- only an explicit `false` turns it off.
-  if (remindToUpdate === false) return;
-
-  // Checked first so a reload costs neither a request nor a prompt.
-  if (now - lastReminderAt < REMINDER_COOLDOWN_MS) return;
-
-  let ageMs = lastSync?.syncedAt ? now - lastSync.syncedAt : null;
-  if (ageMs === null) {
-    // Nothing stored locally. That is not the same as "never synced": extension
-    // storage is wiped by a reinstall, and the extension's id -- and with it its
-    // storage -- changes when an unpacked build moves. The server is the one that
-    // actually knows, so ask it rather than going quiet on a profile that really is
-    // months stale. Throttled so a student who has genuinely never synced does not
-    // cause a request on every page load.
-    if (now - lastSyncCheckAt < REMINDER_COOLDOWN_MS) return;
-    await chrome.storage.local.set({ lastSyncCheckAt: now });
-    ageMs = await serverSyncAge();
+async function recoverInterruptedRun() {
+  const { lastRun, pendingChange } = await chrome.storage.local.get(["lastRun", "pendingChange"]);
+  if (lastRun?.status !== "running" && !pendingChange) return;
+  const requestId = pendingChange?.requestId ?? lastRun?.requestId;
+  let job;
+  try { if (requestId) job = await getWebsiteRequest(requestId); } catch { /* Report interruption below. */ }
+  const message = "The extension was interrupted. Start a new update from your UCSBPlat profile.";
+  if (requestId && !["success", "partial"].includes(job?.status)) {
+    job = await reportWebsiteStatus(requestId, "error", message);
   }
-
-  // Null means we could not establish an age at all -- signed out, or never synced,
-  // in which case the page already says so far more clearly than a popup could.
-  if (ageMs === null || ageMs < STALE_AFTER_MS) return;
-
-  await offerSync();
-  await chrome.storage.local.set({ lastReminderAt: now });
-}
-
-// How stale the *server's* copy is, in milliseconds, or null if that can't be known.
-// The server sends an age rather than a timestamp precisely so no timezone has to
-// survive the trip -- see _synced_seconds_ago in blueprints/extension.py.
-async function serverSyncAge() {
-  try {
-    const response = await fetch(PROGRESS_ENDPOINT, { credentials: "include" });
-    // 401 signed out, 404 never synced: neither is a stale profile worth interrupting.
-    if (!response.ok) return null;
-    const { synced_seconds_ago: seconds } = await response.json();
-    // A server that predates this field answers 200 with it missing, which reads as
-    // "cannot tell" rather than "fresh" -- so an older server goes quiet, it does not
-    // guess.
-    return typeof seconds === "number" ? seconds * 1000 : null;
-  } catch {
-    return null;
-  }
+  await chrome.storage.local.remove("pendingChange");
+  await setRun({ status: job?.status || "error", requestId,
+    message: job?.message || message, step: "", finishedAt: Date.now() });
+  const stored = await chrome.storage.session.get("automationTabId");
+  await chrome.storage.session.remove("automationTabId");
+  if (stored.automationTabId != null) await chrome.tabs.remove(stored.automationTabId).catch(() => {});
 }
 
 async function offerSync() {
@@ -194,29 +159,32 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
     }
     prepareWebsiteAction(message.action, message.requestId)
       .then((opened) => sendResponse({ ok: true, opened }))
-      .catch(() => sendResponse({ ok: false, error: "could_not_prepare" }));
+      .catch((error) => sendResponse({ ok: false, error: "could_not_prepare", message: reason(error) }));
     return true;
   }
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type === "START_SYNC") {
-    if (running) {
-      sendResponse({ started: false });
-      return;
-    }
-    start((async () => {
+  if (message?.type === "GET_POPUP_STATE") {
+    (async () => {
+      await ensureRecovered();
+      const local = await chrome.storage.local.get(["lastRun", "pendingChange"]);
       const stored = await chrome.storage.session.get(WEBSITE_ACTION_KEY);
-      const prepared = stored[WEBSITE_ACTION_KEY];
-      await chrome.storage.session.remove(WEBSITE_ACTION_KEY);
-      if (prepared && Date.now() - prepared.requestedAt < CONFIRM_TTL_MS) {
-        await runSync(prepared.type, prepared.requestId);
-      } else {
-        await runSync();
+      let pending = stored[WEBSITE_ACTION_KEY];
+      if (pending && Date.now() - pending.requestedAt >= CONFIRM_TTL_MS) {
+        await reportWebsiteStatus(pending.requestId, "cancelled", "This confirmation expired. Start a new update from your profile.");
+        await chrome.storage.session.remove(WEBSITE_ACTION_KEY);
+        pending = null;
       }
-    })());
-    sendResponse({ started: true });
-    return;
+      sendResponse({ ...local, pendingWebsiteAction: pending });
+    })().catch(() => sendResponse({ error: "Could not check this update. Open your UCSBPlat profile to try again." }));
+    return true;
+  }
+  if (message?.type === "START_SYNC") {
+    beginPreparedSync(message.requestId)
+      .then(sendResponse)
+      .catch(() => sendResponse({ started: false, message: "Could not start this update. Try again from your UCSBPlat profile." }));
+    return true;
   }
   if (message?.type === "CANCEL_WEBSITE_ACTION") {
     (async () => {
@@ -229,8 +197,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === "CONFIRM_MAJOR_CHANGE") {
-    if (!running) start(resendConfirmed());
-    sendResponse({ started: true });
+    const canConfirm = !running && Boolean(awaitingConfirmation);
+    if (canConfirm) start(resendConfirmed());
+    sendResponse({ started: canConfirm });
     return;
   }
   if (message?.type === "CANCEL_MAJOR_CHANGE") {
@@ -249,38 +218,85 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 function start(work) {
   running = true;
-  work.finally(() => {
+  work.catch(() => {}).finally(() => {
     running = false;
   });
 }
 
 async function prepareWebsiteAction(action, requestId) {
-  // Resolve account ownership and action on the website before showing confirmation.
-  const job = await getWebsiteRequest(requestId);
-  if (job.action !== action || job.status !== "pending") throw new Error("This request is no longer available.");
-  await chrome.storage.session.set({
-    [WEBSITE_ACTION_KEY]: { type: action, requestId, requestedAt: Date.now(),
-      majorLabel: job.audit_selection?.audit?.label ?? null },
-  });
-  return offerSync();
+  await ensureRecovered();
+  if (running || preparing || awaitingConfirmation) throw new Error("An update is already running.");
+  preparing = true;
+  try {
+    const job = await getWebsiteRequest(requestId);
+    if (job.action !== action || job.status !== "pending" || !validPopup(job.popup)) {
+      throw new Error("This request is no longer available. Reload your UCSBPlat profile.");
+    }
+    if (running || awaitingConfirmation) throw new Error("An update is already running.");
+    const stored = await chrome.storage.session.get(WEBSITE_ACTION_KEY);
+    const pending = stored[WEBSITE_ACTION_KEY];
+    if (pending && pending.requestId !== requestId && Date.now() - pending.requestedAt < CONFIRM_TTL_MS) {
+      throw new Error("Confirm or cancel the update already open in the extension.");
+    }
+    await chrome.storage.session.set({
+      [WEBSITE_ACTION_KEY]: { type: job.action, requestId, requestedAt: Date.now(), popup: job.popup },
+    });
+    return offerSync();
+  } finally {
+    preparing = false;
+  }
 }
 
-async function runSync(action = ACTION_SYNC_ALL, requestId = null) {
+function validPopup(popup) {
+  return ["title", "detail", "confirm_label", "running_message"].every((key) =>
+    typeof popup?.[key] === "string" && popup[key].length > 0 && popup[key].length <= 1000);
+}
+
+async function beginPreparedSync(requestId) {
+  await ensureRecovered();
+  if (running || preparing || awaitingConfirmation) return { started: false, message: "An update is already running." };
+  // Reserve the worker before the storage await so two popup clicks cannot start jobs.
+  running = true;
+  try {
+    const stored = await chrome.storage.session.get(WEBSITE_ACTION_KEY);
+    const prepared = stored[WEBSITE_ACTION_KEY];
+    if (!prepared || prepared.requestId !== requestId || Date.now() - prepared.requestedAt >= CONFIRM_TTL_MS) {
+      running = false;
+      return { started: false, message: "Choose an action on your UCSBPlat profile first." };
+    }
+    await chrome.storage.session.remove(WEBSITE_ACTION_KEY);
+    start(runSync(prepared.type, prepared.requestId));
+    return { started: true };
+  } catch (error) {
+    running = false;
+    throw error;
+  }
+}
+
+async function runSync(action, requestId) {
   let tabId = null;
   activeRequestId = requestId;
+  automationTabClosed = false;
+  automationController = new AbortController();
   try {
+    if (!requestId || !WEBSITE_ACTIONS.has(action)) throw new Error("Choose an action on your UCSBPlat profile first.");
     await chrome.storage.local.remove("pendingChange");
     awaitingConfirmation = null;
     await setRun({
       status: "running",
+      requestId,
+      popup: null,
       action,
       step: "Checking your UCSBPlat sign-in…",
       message: "",
       startedAt: Date.now(),
       finishedAt: null,
     });
-    const job = requestId ? await getWebsiteRequest(requestId) : null;
-    if (job && (job.action !== action || !["pending", "running"].includes(job.status))) throw new Error("This request is no longer available.");
+    const job = await getWebsiteRequest(requestId);
+    if (job.action !== action || !["pending", "running"].includes(job.status) || !validPopup(job.popup)) {
+      throw new Error("This request is no longer available. Start a new update from your profile.");
+    }
+    await setRun({ popup: job.popup });
     const profile = await requireSignedIn();
     // Adding a major uses the student's current GOLD choice. Restoring the saved
     // primary selection here would silently re-add the wrong audit.
@@ -291,6 +307,8 @@ async function runSync(action = ACTION_SYNC_ALL, requestId = null) {
     const firstUrl = action === ACTION_ADD_MAJOR ? GOLD_AUDIT_URL : GOLD_SCHEDULE_URL;
     const tab = await chrome.tabs.create({ url: firstUrl, active: false });
     tabId = tab.id;
+    automationTabId = tabId;
+    await chrome.storage.session.set({ automationTabId: tabId });
     await waitForDocument(tabId, "", "GOLD didn't load in time.");
     await assertOnGold(tabId);
 
@@ -318,7 +336,9 @@ async function runSync(action = ACTION_SYNC_ALL, requestId = null) {
       warnings.push("Sent your schedule only — UCSBPlat kept the major and requirements it already had.");
     }
 
+    throwIfTabClosed();
     await setRun({ step: "Sending to UCSBPlat…" });
+    throwIfTabClosed();
     await submit(
       {
         schedule_page: schedule.html ?? "",
@@ -332,7 +352,10 @@ async function runSync(action = ACTION_SYNC_ALL, requestId = null) {
   } catch (error) {
     await reportFailure(error);
   } finally {
+    automationTabId = null;
+    automationController = null;
     if (tabId !== null) await chrome.tabs.remove(tabId).catch(() => {});
+    await chrome.storage.session.remove("automationTabId");
     activeRequestId = null;
   }
 }
@@ -351,6 +374,8 @@ async function captureSchedule(tabId, warnings, navigateToSchedule = false) {
     if (!state.found) throw new Error("the page didn't look like GOLD's schedule");
     return { html: await inject(tabId, capturePage), quarter: state.quarter };
   } catch (error) {
+    if (error instanceof AutomationTabClosedError) throw error;
+    throwIfTabClosed();
     warnings.push(`Couldn't capture your schedule (${reason(error)}). Schedule details weren't updated.`);
     return { html: null, quarter: null };
   }
@@ -391,6 +416,8 @@ async function captureAudit(tabId, warnings, savedSelection, navigateToAudit = t
     await setRun({ step: "Capturing the progress check…" });
     return { html: await inject(tabId, capturePage), selection };
   } catch (error) {
+    if (error instanceof AutomationTabClosedError) throw error;
+    throwIfTabClosed();
     warnings.push(`Couldn't run your major progress check (${reason(error)}).`);
     return { html: null, selection: null };
   }
@@ -451,15 +478,6 @@ async function submit(payload, context, confirmMajorChange = false) {
       throw new Error("UCSBPlat did not return a saved result. Check your profile before retrying.");
     }
     awaitingConfirmation = null;
-    await chrome.storage.local.set({
-      lastSync: {
-        syncedAt: Date.parse(data.synced_at) || Date.now(),
-        quarter: data.student?.current_quarter ?? context.quarter,
-        student: data.student ?? null,
-        counts: data.counts ?? null,
-        warnings: [...context.warnings, ...(data.warnings ?? [])],
-      },
-    });
     await setRun({ status: data.status === "partial" ? "partial" : "success", step: "", message: data.message ?? "Update saved.", finishedAt: Date.now() });
     return;
   }
@@ -480,8 +498,6 @@ async function submit(payload, context, confirmMajorChange = false) {
       pendingChange: {
         requestId: context.requestId ?? null,
         message: data.message ?? "This progress check is for a different major than the one UCSBPlat has stored.",
-        storedCode: data.current_program_code ?? data.stored_program_code ?? null,
-        incomingCode: data.incoming_program_code ?? data.new_program_code ?? null,
       },
     });
     await setRun({ status: "confirm", step: "", message: "", finishedAt: Date.now() });
@@ -495,7 +511,7 @@ async function submit(payload, context, confirmMajorChange = false) {
 }
 
 function postSync(payload, confirmMajorChange) {
-  return fetch(SYNC_ENDPOINT, {
+  return websiteFetch(SYNC_ENDPOINT, {
     method: "POST",
     // Without this the session cookie is never attached and every call is a 401.
     credentials: "include",
@@ -537,7 +553,7 @@ async function resendConfirmed() {
 async function requireSignedIn() {
   let response;
   try {
-    response = await fetch(PROGRESS_ENDPOINT, { credentials: "include" });
+    response = await websiteFetch(PROGRESS_ENDPOINT, { credentials: "include" });
   } catch {
     throw new Error(UNREACHABLE);
   }
@@ -578,7 +594,7 @@ async function readJson(response) {
 async function navigate(tabId, url) {
   const token = newToken();
   await inject(tabId, markDocument, [token]);
-  await chrome.tabs.update(tabId, { url });
+  await whileTabOpen(chrome.tabs.update(tabId, { url }));
   await waitForDocument(tabId, token, `${url} didn't load in time.`);
 }
 
@@ -600,7 +616,8 @@ async function waitForDocument(tabId, token, timeoutMessage, timeoutMs = 60_000)
       const state = await inject(tabId, documentState, [token]);
       erroringSince = null;
       if (state.ready && !state.marked) return;
-    } catch {
+    } catch (error) {
+      if (error instanceof AutomationTabClosedError) throw error;
       erroringSince ??= Date.now();
       if (Date.now() - erroringSince > 8_000) await assertOnGold(tabId);
     }
@@ -635,22 +652,35 @@ async function waitForDomSettle(tabId) {
 }
 
 async function assertOnGold(tabId) {
-  const tab = await chrome.tabs.get(tabId);
+  throwIfTabClosed();
+  let tab;
+  try { tab = await chrome.tabs.get(tabId); } catch { throw new AutomationTabClosedError(); }
   if (!tab.url?.startsWith(GOLD_ORIGIN)) throw new Error(GOLD_SIGNED_OUT);
 }
 
 async function inject(tabId, func, args = []) {
-  const [frame] = await chrome.scripting.executeScript({ target: { tabId }, func, args });
-  return frame?.result;
+  throwIfTabClosed();
+  try {
+    const [frame] = await whileTabOpen(chrome.scripting.executeScript({ target: { tabId }, func, args }));
+    throwIfTabClosed();
+    return frame?.result;
+  } catch (error) {
+    throwIfTabClosed();
+    try { await chrome.tabs.get(tabId); } catch { throw new AutomationTabClosedError(); }
+    throw error;
+  }
 }
 
 async function setRun(patch) {
+  if (activeRequestId && ["running", "error", "signin", "cancelled"].includes(patch.status)) {
+    const job = await reportWebsiteStatus(activeRequestId, patch.status === "signin" ? "error" : patch.status,
+      patch.message || patch.step || "Working in GOLD…");
+    if (["success", "partial"].includes(job?.status)) {
+      patch = { ...patch, status: job.status, message: job.message, step: "", finishedAt: Date.now() };
+    }
+  }
   const { lastRun = {} } = await chrome.storage.local.get("lastRun");
   await chrome.storage.local.set({ lastRun: { ...lastRun, ...patch } });
-  if (activeRequestId && ["running", "error", "signin", "cancelled"].includes(patch.status)) {
-    await reportWebsiteStatus(activeRequestId, patch.status === "signin" ? "error" : patch.status,
-      patch.message || patch.step || "Working in GOLD…");
-  }
 }
 
 function reason(error) {
@@ -667,7 +697,7 @@ function sleep(ms) {
 
 
 async function getWebsiteRequest(requestId) {
-  const response = await fetch(`${UCSBPLAT_ORIGIN}/api/extension/sync-requests/${requestId}`, { credentials: "include" });
+  const response = await websiteFetch(`${UCSBPLAT_ORIGIN}/api/extension/sync-requests/${requestId}`, { credentials: "include" });
   const job = await readJson(response);
   if (!response.ok) throw new Error(job.message ?? "Could not prepare this website update. Try again.");
   return job;
@@ -675,11 +705,26 @@ async function getWebsiteRequest(requestId) {
 
 async function reportWebsiteStatus(requestId, status, message) {
   try {
-    await fetch(`${UCSBPLAT_ORIGIN}/api/extension/sync-requests/${requestId}`, {
+    const response = await websiteFetch(`${UCSBPLAT_ORIGIN}/api/extension/sync-requests/${requestId}`, {
       method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status, message }),
-    });
+    }, 5000);
+    return response.ok ? readJson(response) : null;
   } catch {
     // Popup still reports the local failure; website requests also expire after 15 minutes.
+  }
+}
+
+// Bound website calls so a disconnected request cannot hold the worker's run lock forever.
+async function websiteFetch(url, options = {}, timeoutMs = 30_000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    // Consume the response within the timeout as well; a stalled body is still a stall.
+    const data = await readJson(response);
+    return { ok: response.ok, status: response.status, json: async () => data };
+  } finally {
+    clearTimeout(timeout);
   }
 }

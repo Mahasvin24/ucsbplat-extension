@@ -31,7 +31,7 @@ to build an archive containing `sample-data`, docs, or git metadata. A correct p
   on the Web Store's Privacy practices tab and is checked at review.
 - **The functions in `injected.js` are serialized** by `chrome.scripting.executeScript`, so
   each must be entirely self-contained — no imports, no closure over module scope.
-- **Permissions are `scripting`, `storage`, `cookies` and two hosts.** Every one is
+- **Permissions are `scripting`, `storage` and two hosts.** Every one is
   justified in `STORE_LISTING.md`. An unnecessary permission is a stated rejection reason,
   so do not add one without deciding what its justification will say.
 - **`credentials: "include"` on both `fetch()` calls is load-bearing.** The browser attaches
@@ -46,8 +46,8 @@ to build an archive containing `sample-data`, docs, or git metadata. A correct p
 **An unpacked extension's ID is derived from its folder path; a published one is
 permanent.** Renaming the checkout changes the ID and every sync 403s until the server's
 `EXTENSION_ID` catches up. That has already happened once. It also wipes
-`chrome.storage.local`, which is why a reminder can go quiet on a profile that really is
-months stale — see the `lastSync` note in `README.md`.
+`chrome.storage.local`. Website request receipts are account-scoped on the server;
+never infer sync success from extension-local timestamps.
 
 The published ID is `cffmlcefmeeeiidkdffgjimpjojiibap`.
 
@@ -81,10 +81,9 @@ record.
 ## How to verify
 
 There is no test runner. `background.js` is exercised by a scripted harness that stubs the
-`chrome.*` APIs and drives the real module — the reminder logic in particular, whose
-failure mode is silence. Rebuild that harness rather than reasoning about the guards by
-eye; a passing read of the code is what let the "no popup on the profile page" bug survive
-several rounds.
+`chrome.*` APIs and drives the real module, including tab closure, website-only initiation,
+restart recovery, and popup rendering. Extend that harness for lifecycle changes;
+reading the guards alone does not establish that Chrome events release the run lock.
 
 ```bash
 node --check background.js && node --check popup.js
@@ -103,11 +102,15 @@ logs are behind the "service worker" link there.
 - Do not leave `console.log` in a shipped build; the diagnostics from one debugging round
   were committed by accident and had to be stripped before submission.
 
-## Website request protocol (v3)
+## Website request protocol (v4)
 
 A prepared action carries a server-issued request ID. Resolve its action/selectors from the
-website and require popup confirmation. The website alone declares saved success/partial
+website and require popup confirmation. There is no standalone sync fallback. The server
+supplies the popup title, detail, confirm label, and running message; detailed results live
+on the website. A raw toolbar opening links to the profile. Profile visits do not trigger
+reminders. Closing the automation tab must abort even a pending injection, fail the website
+request, and release the worker without submitting a partial capture. The website alone declares saved success/partial
 and supplies freshness; do not turn every HTTP 200 into "Up to date". Report local failures
 and cancellation to that request without storing captured HTML. Refresh-major restores the
-requested audit's selectors, while add-major keeps the current GOLD choice. Release v1.2
-requires the matching protocol-v3 website. Keep `check.cjs` out of release archives.
+requested audit's selectors, while add-major keeps the current GOLD choice. Release v1.3
+requires the matching protocol-v4 website. Keep `check.cjs` out of release archives.
