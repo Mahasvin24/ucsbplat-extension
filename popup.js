@@ -3,6 +3,7 @@ import { UCSBPLAT_ORIGIN } from "./config.js";
 const STALE_RUN_MS = 3 * 60 * 1000;
 const WEBSITE_ACTION_TTL_MS = 10 * 60 * 1000;
 const ACTION_ADD_MAJOR = "add_major";
+const ACTION_LABELS = {add_major: "Add this major", refresh_major: "Refresh this major", sync_all: "Update my Course Data"};
 const WEBSITE_ACTION_KEY = "pendingWebsiteAction";
 
 let preparedAction = null;
@@ -13,6 +14,9 @@ const els = {
   status: document.getElementById("status"),
   warnings: document.getElementById("warnings"),
   websiteAction: document.getElementById("websiteAction"),
+  websiteActionTitle: document.getElementById("websiteActionTitle"),
+  websiteActionDetail: document.getElementById("websiteActionDetail"),
+  cancelWebsiteAction: document.getElementById("cancelWebsiteAction"),
   confirm: document.getElementById("confirm"),
   confirmMessage: document.getElementById("confirmMessage"),
   confirmYes: document.getElementById("confirmYes"),
@@ -37,6 +41,8 @@ els.run.addEventListener("click", async () => {
     els.run.disabled = false;
   }
 });
+
+els.cancelWebsiteAction.addEventListener("click", () => chrome.runtime.sendMessage({ type: "CANCEL_WEBSITE_ACTION" }));
 
 els.signin.addEventListener("click", () => chrome.tabs.create({ url: UCSBPLAT_ORIGIN }));
 els.confirmYes.addEventListener("click", () => chrome.runtime.sendMessage({ type: "CONFIRM_MAJOR_CHANGE" }));
@@ -67,7 +73,7 @@ async function render() {
   ]);
   const { lastRun = {}, lastSync, pendingChange, remindToUpdate } = local;
   const pendingWebsiteAction = session[WEBSITE_ACTION_KEY];
-  preparedAction = pendingWebsiteAction?.type === ACTION_ADD_MAJOR
+  preparedAction = Object.hasOwn(ACTION_LABELS, pendingWebsiteAction?.type)
       && Date.now() - pendingWebsiteAction.requestedAt < WEBSITE_ACTION_TTL_MS
     ? pendingWebsiteAction
     : null;
@@ -85,17 +91,21 @@ async function render() {
   else if (lastRun.status === "error" || lastRun.status === "signin" || lastRun.status === "cancelled")
     els.status.textContent = lastRun.message ?? "Something went wrong.";
   else if (lastRun.status === "confirm") els.status.textContent = "";
-  else if (lastRun.status === "success" && lastRun.action === ACTION_ADD_MAJOR)
-    els.status.textContent = lastRun.message || "Major added to UCSBPlat.";
-  else if (lastRun.status === "success") els.status.textContent = "Up to date.";
+  else if (["success", "partial"].includes(lastRun.status))
+    els.status.textContent = lastRun.message || "Update saved.";
   else els.status.textContent = "";
 
-  els.websiteAction.hidden = preparedAction?.type !== ACTION_ADD_MAJOR;
-  els.run.textContent = preparedAction?.type === ACTION_ADD_MAJOR
-    ? "Add this major"
-    : "Update my Course Data";
+  els.websiteAction.hidden = !preparedAction;
+  els.websiteActionTitle.textContent = preparedAction?.type === ACTION_ADD_MAJOR
+    ? "Add your selected major?" : "Update your saved course data?";
+  els.websiteActionDetail.textContent = preparedAction?.type === "refresh_major"
+    ? `Refresh ${preparedAction.majorLabel || "this major"} from GOLD and update your schedule.`
+    : preparedAction?.type === ACTION_ADD_MAJOR
+      ? "Read the major selected in GOLD and save its progress check to your account."
+      : "Update your schedule and primary major progress from GOLD.";
+  els.run.textContent = ACTION_LABELS[preparedAction?.type] || ACTION_LABELS.sync_all;
 
-  const warnings = lastRun.status === "success" ? lastSync?.warnings ?? [] : [];
+  const warnings = ["success", "partial"].includes(lastRun.status) ? lastSync?.warnings ?? [] : [];
   els.warnings.replaceChildren(...warnings.map((text) => Object.assign(document.createElement("li"), { textContent: text })));
   els.warnings.hidden = warnings.length === 0;
 

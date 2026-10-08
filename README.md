@@ -4,7 +4,7 @@ of the courses a student has taken and is currently taking.
 
 ## What a sync does
 
-1. Checks the student is signed in to ucsbplat.com (`GET /api/extension/progress`). A 401 stops the
+1. Checks the student is signed in to ucsbplat.com (`GET /api/extension/session`). A 401 stops the
    run before GOLD is ever opened. If the student has synced before, the response also supplies
    the two saved Major Progress Check selections.
 2. Opens `StudentSchedule.aspx` in a background tab and captures it, noting the selected quarter.
@@ -19,11 +19,22 @@ Either page alone is still worth sending, so a failure on one is reported as a w
 is sent anyway. The captured HTML is the student's full transcript: it is never written to extension
 storage, never logged, and is dropped as soon as the request finishes.
 
-The website can also prepare the narrow `add_major` action during onboarding. The popup names the
-action and waits for the student to confirm it. That run skips the schedule, reads the Major Area and
-audit currently selected in GOLD, runs that progress check, and saves the selector pair with the
-audit. A website message can prepare and display this confirmation; it cannot start GOLD automation
-or read extension storage.
+The website prepares `add_major`, `sync_all`, or `refresh_major` using a short-lived,
+account-scoped server request ID. The extension resolves that request from the website,
+shows a confirmation popup, and starts only after the student confirms. Add-major reads
+the current GOLD choice, captures its audit and the schedule, and can save the first major
+or another major. Refresh-major restores the saved selectors for the requested major;
+normal full updates restore the primary major's selectors.
+
+The website decides the saved result. A successful response includes `status: success`
+or `partial`, the database timestamp, stored summary/counts, and warnings. Both the popup
+and website display that result. The extension reports running/failure/cancellation to the
+same account-scoped request; it cannot declare a save successful itself. Prepared actions
+can be cancelled in the popup. No captured HTML is written to extension storage.
+
+Protocol v3 requires extension v1.2 and the corresponding website changes. A website message
+cannot start GOLD automation or read extension storage. Status receipts contain no captured
+HTML, expire on the server after 15 minutes, and are erased with course-data deletion.
 
 ## Pointing at a server
 
@@ -85,7 +96,8 @@ To point it at a local UCSBPlat, swap `UCSBPLAT_ORIGIN` to `LOCAL_ORIGIN` in `co
 During onboarding, run the progress check for your current major in GOLD, then choose **Add this
 major** on UCSBPlat and confirm the same action in the extension popup. For later full updates, click
 the extension icon and choose **Update my Course Data**. The popup shows progress while it runs, then
-the stored major, quarter and counts, plus any warnings the server returned.
+the server-confirmed stored major, quarter and counts, plus any warnings. The website
+updates when that request completes; failures and cancellations stop its waiting state.
 
 ## Files
 
@@ -119,3 +131,14 @@ Service worker logs are behind the "service worker" link on `chrome://extensions
 
 `sample-data/` holds saved copies of both GOLD pages used to pin down the element IDs. It is
 gitignored because it contains real academic records.
+
+## Verification
+
+`node check.cjs` drives the real service worker with synthetic Chrome and HTTP stubs. It
+checks origin/action restrictions, confirmation, request propagation, selected-major
+restoration, partial/failure results, cancellation, reminder guards, and that captured HTML
+never reaches storage. `node --check background.js && node --check popup.js` checks syntax.
+
+For release verification, use a temporary release copy, restore hosted configuration,
+remove localhost from both manifest lists, and run `./package.sh`. Keep the development
+checkout pointed at localhost. Real GOLD/Chrome behavior still needs an unpacked-browser sync.

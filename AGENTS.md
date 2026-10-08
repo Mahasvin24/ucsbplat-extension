@@ -88,6 +88,7 @@ several rounds.
 
 ```bash
 node --check background.js && node --check popup.js
+node check.cjs
 ./package.sh          # must print "clean" and list no sample-data
 ```
 
@@ -101,3 +102,12 @@ logs are behind the "service worker" link there.
 - Do not add a permission without also writing its justification.
 - Do not leave `console.log` in a shipped build; the diagnostics from one debugging round
   were committed by accident and had to be stripped before submission.
+
+## Website request protocol (v3)
+
+A prepared action carries a server-issued request ID. Resolve its action/selectors from the
+website and require popup confirmation. The website alone declares saved success/partial
+and supplies freshness; do not turn every HTTP 200 into "Up to date". Report local failures
+and cancellation to that request without storing captured HTML. Refresh-major restores the
+requested audit's selectors, while add-major keeps the current GOLD choice. Release v1.2
+requires the matching protocol-v3 website. Keep `check.cjs` out of release archives.

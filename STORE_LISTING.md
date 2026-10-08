@@ -169,3 +169,12 @@ image is public, and a real transcript is the one thing that must never be in on
    name, which is a deploy, not a code change.
 4. The published extension gets a permanent ID different from the unpacked one. Add it to
    `EXTENSION_ID` on the server, or the API will answer 403 — see the README.
+
+## Website actions (v1.2)
+
+Website-initiated add-major, full-update, and selected-major-refresh actions use an
+account-scoped server request and require confirmation in the extension popup. The server
+returns the saved result; the website can also display failure and cancellation. These
+actions collect the same two GOLD pages and academic fields described above, add no
+permissions, and never store captured HTML. Deploy the updated privacy policy before
+submitting this release. `check.cjs` is a development harness and is excluded by `package.sh`.

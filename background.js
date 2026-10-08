@@ -21,12 +21,15 @@ const GOLD_SIGNED_OUT = "Couldn't reach GOLD. Sign in at my.sa.ucsb.edu/gold and
 
 const UCSBPLAT_HOST = new URL(UCSBPLAT_ORIGIN).hostname;
 const SYNC_ENDPOINT = `${UCSBPLAT_ORIGIN}/api/extension/gold-sync`;
-const PROGRESS_ENDPOINT = `${UCSBPLAT_ORIGIN}/api/extension/progress`;
+const PROGRESS_ENDPOINT = `${UCSBPLAT_ORIGIN}/api/extension/session`;
 const UNREACHABLE = `Couldn't reach ${UCSBPLAT_HOST}. Check your connection and try again.`;
 const WEBSITE_ORIGINS = new Set([HOSTED_ORIGIN, LOCAL_ORIGIN]);
-const EXTERNAL_PROTOCOL_VERSION = 2;
+const EXTERNAL_PROTOCOL_VERSION = 3;
 const ACTION_SYNC_ALL = "sync_all";
 const ACTION_ADD_MAJOR = "add_major";
+const ACTION_REFRESH_MAJOR = "refresh_major";
+const WEBSITE_ACTIONS = new Set([ACTION_ADD_MAJOR, ACTION_SYNC_ALL, ACTION_REFRESH_MAJOR]);
+let activeRequestId = null;
 const WEBSITE_ACTION_KEY = "pendingWebsiteAction";
 
 const CONFIRM_TTL_MS = 10 * 60 * 1000;
@@ -185,11 +188,11 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
   }
 
   if (message?.type === "UCSBPLAT_PREPARE_ACTION") {
-    if (message.action !== ACTION_ADD_MAJOR) {
+    if (!WEBSITE_ACTIONS.has(message.action) || !/^[0-9a-f-]{36}$/.test(message.requestId ?? "")) {
       sendResponse({ ok: false, error: "unsupported_action" });
       return;
     }
-    prepareWebsiteAction(message.action)
+    prepareWebsiteAction(message.action, message.requestId)
       .then((opened) => sendResponse({ ok: true, opened }))
       .catch(() => sendResponse({ ok: false, error: "could_not_prepare" }));
     return true;
@@ -202,11 +205,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ started: false });
       return;
     }
-    const action = message.action === ACTION_ADD_MAJOR ? ACTION_ADD_MAJOR : ACTION_SYNC_ALL;
-    chrome.storage.session.remove(WEBSITE_ACTION_KEY);
-    start(runSync(action));
+    start((async () => {
+      const stored = await chrome.storage.session.get(WEBSITE_ACTION_KEY);
+      const prepared = stored[WEBSITE_ACTION_KEY];
+      await chrome.storage.session.remove(WEBSITE_ACTION_KEY);
+      if (prepared && Date.now() - prepared.requestedAt < CONFIRM_TTL_MS) {
+        await runSync(prepared.type, prepared.requestId);
+      } else {
+        await runSync();
+      }
+    })());
     sendResponse({ started: true });
     return;
+  }
+  if (message?.type === "CANCEL_WEBSITE_ACTION") {
+    (async () => {
+      const stored = await chrome.storage.session.get(WEBSITE_ACTION_KEY);
+      const pending = stored[WEBSITE_ACTION_KEY];
+      if (pending?.requestId) await reportWebsiteStatus(pending.requestId, "cancelled", "Update cancelled. Nothing was changed.");
+      await chrome.storage.session.remove(WEBSITE_ACTION_KEY);
+      sendResponse({ cancelled: true });
+    })();
+    return true;
   }
   if (message?.type === "CONFIRM_MAJOR_CHANGE") {
     if (!running) start(resendConfirmed());
@@ -214,10 +234,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return;
   }
   if (message?.type === "CANCEL_MAJOR_CHANGE") {
-    awaitingConfirmation = null;
-    chrome.storage.local.remove("pendingChange");
-    setRun({ status: "cancelled", step: "", message: "Nothing was changed.", finishedAt: Date.now() });
-    sendResponse({ started: true });
+    (async () => {
+      const stored = await chrome.storage.local.get("pendingChange");
+      const requestId = awaitingConfirmation?.context.requestId ?? stored.pendingChange?.requestId;
+      if (requestId) await reportWebsiteStatus(requestId, "cancelled", "Update cancelled. Nothing was changed.");
+      awaitingConfirmation = null;
+      await chrome.storage.local.remove("pendingChange");
+      await setRun({ status: "cancelled", step: "", message: "Nothing was changed.", finishedAt: Date.now() });
+      sendResponse({ started: true });
+    })();
+    return true;
   }
 });
 
@@ -228,15 +254,20 @@ function start(work) {
   });
 }
 
-async function prepareWebsiteAction(action) {
+async function prepareWebsiteAction(action, requestId) {
+  // Resolve account ownership and action on the website before showing confirmation.
+  const job = await getWebsiteRequest(requestId);
+  if (job.action !== action || job.status !== "pending") throw new Error("This request is no longer available.");
   await chrome.storage.session.set({
-    [WEBSITE_ACTION_KEY]: { type: action, requestedAt: Date.now() },
+    [WEBSITE_ACTION_KEY]: { type: action, requestId, requestedAt: Date.now(),
+      majorLabel: job.audit_selection?.audit?.label ?? null },
   });
   return offerSync();
 }
 
-async function runSync(action = ACTION_SYNC_ALL) {
+async function runSync(action = ACTION_SYNC_ALL, requestId = null) {
   let tabId = null;
+  activeRequestId = requestId;
   try {
     await chrome.storage.local.remove("pendingChange");
     awaitingConfirmation = null;
@@ -248,8 +279,13 @@ async function runSync(action = ACTION_SYNC_ALL) {
       startedAt: Date.now(),
       finishedAt: null,
     });
+    const job = requestId ? await getWebsiteRequest(requestId) : null;
+    if (job && (job.action !== action || !["pending", "running"].includes(job.status))) throw new Error("This request is no longer available.");
     const profile = await requireSignedIn();
-    const savedSelection = profile?.student?.audit_selection ?? null;
+    // Adding a major uses the student's current GOLD choice. Restoring the saved
+    // primary selection here would silently re-add the wrong audit.
+    const savedSelection = action === ACTION_ADD_MAJOR
+      ? null : job?.audit_selection ?? profile?.student?.audit_selection ?? null;
 
     await setRun({ step: "Opening GOLD…" });
     const firstUrl = action === ACTION_ADD_MAJOR ? GOLD_AUDIT_URL : GOLD_SCHEDULE_URL;
@@ -272,6 +308,9 @@ async function runSync(action = ACTION_SYNC_ALL) {
     // After trying it, visit My Schedule as well: the audit has course names
     // but not the units, instructors, rooms, times, or sections shown on Home.
     if (!scheduleFirst) schedule = await captureSchedule(tabId, warnings, true);
+    if (action !== ACTION_SYNC_ALL && !audit.html) {
+      throw new Error("Couldn't capture that major's progress check. Your saved majors were not changed.");
+    }
     if (!schedule.html && !audit.html) {
       throw new Error("Couldn't capture either GOLD page. Try again in a minute.");
     }
@@ -285,13 +324,16 @@ async function runSync(action = ACTION_SYNC_ALL) {
         schedule_page: schedule.html ?? "",
         major_progress_check: audit.html ?? "",
         ...(audit.selection ? { audit_selection: audit.selection } : {}),
+        action,
+        ...(requestId ? { request_id: requestId } : {}),
       },
-      { quarter: schedule.quarter, warnings, action },
+      { quarter: schedule.quarter, warnings, action, requestId },
     );
   } catch (error) {
     await reportFailure(error);
   } finally {
     if (tabId !== null) await chrome.tabs.remove(tabId).catch(() => {});
+    activeRequestId = null;
   }
 }
 
@@ -405,21 +447,20 @@ async function submit(payload, context, confirmMajorChange = false) {
   const data = await readJson(response);
 
   if (response.ok) {
+    if (!["success", "partial"].includes(data.status) || !data.synced_at) {
+      throw new Error("UCSBPlat did not return a saved result. Check your profile before retrying.");
+    }
     awaitingConfirmation = null;
     await chrome.storage.local.set({
       lastSync: {
         syncedAt: Date.parse(data.synced_at) || Date.now(),
-        quarter: context.quarter,
+        quarter: data.student?.current_quarter ?? context.quarter,
         student: data.student ?? null,
         counts: data.counts ?? null,
         warnings: [...context.warnings, ...(data.warnings ?? [])],
       },
     });
-    const majorAdded = data.student?.program_code || data.student?.audit_selection?.audit?.value;
-    const message = context.action === ACTION_ADD_MAJOR && !majorAdded
-      ? "Your schedule was updated, but your major wasn't added. Try the progress check again."
-      : "";
-    await setRun({ status: "success", step: "", message, finishedAt: Date.now() });
+    await setRun({ status: data.status === "partial" ? "partial" : "success", step: "", message: data.message ?? "Update saved.", finishedAt: Date.now() });
     return;
   }
 
@@ -437,6 +478,7 @@ async function submit(payload, context, confirmMajorChange = false) {
     awaitingConfirmation = { payload, context, expiresAt: Date.now() + CONFIRM_TTL_MS };
     await chrome.storage.local.set({
       pendingChange: {
+        requestId: context.requestId ?? null,
         message: data.message ?? "This progress check is for a different major than the one UCSBPlat has stored.",
         storedCode: data.current_program_code ?? data.stored_program_code ?? null,
         incomingCode: data.incoming_program_code ?? data.new_program_code ?? null,
@@ -465,8 +507,11 @@ function postSync(payload, confirmMajorChange) {
 async function resendConfirmed() {
   const pending = awaitingConfirmation;
   awaitingConfirmation = null;
+  const stored = await chrome.storage.local.get("pendingChange");
   await chrome.storage.local.remove("pendingChange");
   if (!pending || pending.expiresAt < Date.now()) {
+    const requestId = pending?.context.requestId ?? stored.pendingChange?.requestId;
+    if (requestId) await reportWebsiteStatus(requestId, "error", "That confirmation expired. Run the update again.");
     await setRun({
       status: "error",
       message: "That confirmation expired. Run the update again.",
@@ -475,6 +520,7 @@ async function resendConfirmed() {
     return;
   }
   try {
+    activeRequestId = pending.context.requestId;
     await setRun({ status: "running", step: "Sending to UCSBPlat…", message: "", startedAt: Date.now(), finishedAt: null });
     await submit(
       pending.payload,
@@ -483,6 +529,8 @@ async function resendConfirmed() {
     );
   } catch (error) {
     await reportFailure(error);
+  } finally {
+    activeRequestId = null;
   }
 }
 
@@ -493,9 +541,10 @@ async function requireSignedIn() {
   } catch {
     throw new Error(UNREACHABLE);
   }
-  // 404 means signed in but never synced, which is fine — only 401 blocks us.
+  // Only a genuine not-synced response is safe to continue without saved selectors.
   if (response.status === 401) throw missingSessionError();
-  if (!response.ok) return null;
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`UCSBPlat could not check your saved profile (${response.status}). Try again.`);
   return readJson(response);
 }
 
@@ -598,6 +647,10 @@ async function inject(tabId, func, args = []) {
 async function setRun(patch) {
   const { lastRun = {} } = await chrome.storage.local.get("lastRun");
   await chrome.storage.local.set({ lastRun: { ...lastRun, ...patch } });
+  if (activeRequestId && ["running", "error", "signin", "cancelled"].includes(patch.status)) {
+    await reportWebsiteStatus(activeRequestId, patch.status === "signin" ? "error" : patch.status,
+      patch.message || patch.step || "Working in GOLD…");
+  }
 }
 
 function reason(error) {
@@ -610,4 +663,23 @@ function newToken() {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+
+async function getWebsiteRequest(requestId) {
+  const response = await fetch(`${UCSBPLAT_ORIGIN}/api/extension/sync-requests/${requestId}`, { credentials: "include" });
+  const job = await readJson(response);
+  if (!response.ok) throw new Error(job.message ?? "Could not prepare this website update. Try again.");
+  return job;
+}
+
+async function reportWebsiteStatus(requestId, status, message) {
+  try {
+    await fetch(`${UCSBPLAT_ORIGIN}/api/extension/sync-requests/${requestId}`, {
+      method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, message }),
+    });
+  } catch {
+    // Popup still reports the local failure; website requests also expire after 15 minutes.
+  }
 }
