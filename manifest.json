@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "UCSBPlat",
-  "version": "1.4",
+  "version": "1.5",
   "description": "Syncs your GOLD schedule and major progress check to UCSBPlat",
   "permissions": ["scripting", "storage"],
   "host_permissions": [
@@ -26,7 +26,6 @@
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_popup": "popup.html",
     "default_title": "UCSBPlat",
     "default_icon": {
       "16": "icons/icon16.png",

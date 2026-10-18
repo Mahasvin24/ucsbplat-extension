@@ -17,7 +17,8 @@ function setup({getStatus = 200, action = 'add_major', postStatus = 200, resultS
   let shouldClose = closeAt;
   let shouldHang = hangAt;
   const listeners = {updated: []};
-  const calls = {popup: 0, tabs: 0, posts: [], selections: [], reports: [], injections: [], runs: []};
+  const calls = {popup: 0, tabs: 0, posts: [], selections: [], reports: [], injections: [], runs: [], tabOptions: [], focused: 0};
+  let syncWindowExists = false;
   const job = {request_id: requestId, action, status: 'pending', popup: {
     title: 'Website action title', detail: 'Website explanation', confirm_label: 'Website confirm label',
     running_message: 'Website running message',
@@ -33,7 +34,7 @@ function setup({getStatus = 200, action = 'add_major', postStatus = 200, resultS
   });
   const chrome = {
     runtime: {
-      id: 'synthetic', getManifest: () => ({version: '1.4'}),
+      id: 'synthetic', getManifest: () => ({version: '1.5'}), getURL: name => `chrome-extension://synthetic/${name}`,
       onInstalled: {addListener() {}},
       onMessageExternal: {addListener: (fn) => { listeners.external = fn; }},
       onMessage: {addListener: (fn) => { listeners.internal = fn; }},
@@ -42,13 +43,19 @@ function setup({getStatus = 200, action = 'add_major', postStatus = 200, resultS
     tabs: {
       onUpdated: {addListener: (fn) => listeners.updated.push(fn)},
       onRemoved: {addListener: (fn) => { listeners.removed = fn; }},
-      create: async () => { calls.tabs++; tabExists = true; return {id: 1}; }, update: async () => {},
+      create: async (options) => { calls.tabs++; calls.tabOptions.push(options); tabExists = true; return {id: 1}; }, update: async () => {},
       get: async () => {
         if (!tabExists) throw new Error('No tab with id: 1');
         return {url: 'https://my.sa.ucsb.edu/gold/AcademicProgress.aspx'};
       }, remove: async (id) => { tabExists = false; listeners.removed(id); },
     },
+    windows: {
+      create: async (options) => { calls.popup++; syncWindowExists = true; calls.windowOptions = options; return {id: 99}; },
+      update: async () => { if (!syncWindowExists) throw new Error('Closed window'); calls.focused++; return {id: 99}; },
+      getLastFocused: async () => ({id: 10}),
+    },
     action: {
+      onClicked: {addListener: fn => {listeners.toolbarClick = fn;}},
       openPopup: async () => { calls.popup++; }, setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {},
     },
     scripting: {executeScript: async ({func, args}) => {
@@ -128,6 +135,7 @@ function setup({getStatus = 200, action = 'add_major', postStatus = 200, resultS
     context[name] = ({[name]: function () {}})[name];
   }
   vm.runInContext(source, context);
+  listeners.closeSyncWindow = () => { syncWindowExists = false; listeners.removed(50); };
   return {context, storage, listeners, calls, job};
 }
 let passed = 0;
@@ -139,8 +147,9 @@ async function popupScenario(initialState, {respond} = {}) {
   const tabs = [];
   const storageListeners = [];
   const context = vm.createContext({
-    document: {body: {dataset: {}}, getElementById(id) {
+    document: {body: {dataset: {}}, createElement() { return {textContent: ''}; }, getElementById(id) {
       return elements[id] ??= {hidden: true, disabled: false, textContent: "", events: {},
+        children: [], replaceChildren(...children) { this.children = children; },
         classList: {toggle() {}}, addEventListener(type, callback) { this.events[type] = callback; }};
     }},
     chrome: {
@@ -200,6 +209,12 @@ async function popupScenario(initialState, {respond} = {}) {
   check(s.storage.session.pendingWebsiteAction.requestId === requestId && s.calls.tabs === 0, 'preparation does not start GOLD');
   await vm.runInContext(`runSync('add_major', '${requestId}')`, s.context);
   check(s.calls.posts[0].action === 'add_major' && s.calls.posts[0].request_id === requestId, 'website request carried through submission');
+  check(s.calls.tabOptions[0].windowId === 10 && s.calls.tabOptions[0].active === false,
+    'GOLD stays in the normal browser window without replacing the sync window');
+  check(s.calls.windowOptions.type === 'popup' && s.calls.windowOptions.url === 'chrome-extension://synthetic/popup.html',
+    'website confirmation uses a persistent extension window');
+  check(s.calls.runs.some(run => run.progress?.current === 2 && run.progress.total === 7)
+    && s.storage.local.lastRun.progress.current === 7, 'single-major sync reports 7 numbered stages through server completion');
   check(s.calls.selections.length === 2 && s.calls.posts[0].schedule_page, 'add-major explicitly restores both requested fields and captures schedule');
   check(s.storage.local.lastRun.message === 'Website saved result.', 'popup uses website result');
   check(!JSON.stringify(s.storage).includes('<html>'), 'captured HTML never stored');
@@ -224,6 +239,8 @@ async function popupScenario(initialState, {respond} = {}) {
   check(s.calls.reports.some((report) => report.message.includes('BS - Applied Mathematics')),
     'website receives live major progress as well as the popup');
   check(!JSON.stringify(s.storage).includes('<html>'), 'multi-major HTML remains in memory only');
+  check(s.calls.runs.some(run => run.progress?.current === 7 && run.progress.total === 10)
+    && s.storage.local.lastRun.progress.current === 10, 'two-major sync reports 10 stages with a distinct second audit run');
   for (const action of ['add_major', 'refresh_major', 'sync_all']) {
     s = setup({action, resetSelectionAfterRun: true, ...(action === 'sync_all' ? {audits: targets} : {})});
     await vm.runInContext(`runSync('${action}', '${requestId}')`, s.context);
@@ -294,6 +311,22 @@ async function popupScenario(initialState, {respond} = {}) {
     }
     throw new Error('worker stayed locked');
   };
+  s = setup();
+  await s.listeners.toolbarClick();
+  check(s.calls.popup === 1 && s.calls.tabs === 0, 'toolbar opens a persistent view without starting a sync');
+  s = setup();
+  await vm.runInContext(`prepareWebsiteAction('add_major', '${requestId}')`, s.context);
+  await vm.runInContext(`prepareWebsiteAction('add_major', '${requestId}')`, s.context);
+  check(s.calls.popup === 1 && s.calls.focused === 1, 'existing sync window is focused instead of creating duplicates');
+  await internal(s, {type: 'START_SYNC', requestId});
+  while (!s.calls.tabs) await new Promise(resolve => setImmediate(resolve));
+  s.listeners.closeSyncWindow();
+  await idle(s);
+  check(s.calls.posts.length === 1 && s.storage.local.lastRun.status === 'success',
+    'closing the extension UI leaves the GOLD worker running to completion');
+  s.job.status = 'pending';
+  await vm.runInContext(`prepareWebsiteAction('add_major', '${requestId}')`, s.context);
+  check(s.calls.popup === 2, 'a manually closed sync window can be reopened for the next request');
   for (const action of ['sync_all', 'add_major', 'refresh_major']) {
     for (const closeAt of ['documentState', 'scheduleState', 'auditReadyState', 'domSize']) {
       s = setup({action, closeAt});
@@ -331,6 +364,8 @@ async function popupScenario(initialState, {respond} = {}) {
   s = setup({committedThenLost: true});
   await vm.runInContext(`runSync('add_major', '${requestId}')`, s.context);
   check(s.storage.local.lastRun.status === 'success' && s.storage.local.lastRun.message === s.job.message, 'website receipt resolves a lost response after commit');
+  check(s.storage.local.lastRun.progress.current === s.storage.local.lastRun.progress.total,
+    'recovered committed success completes the progress bar');
   s = setup({action: 'sync_all', postStatus: 409});
   await vm.runInContext(`prepareWebsiteAction('sync_all', '${requestId}')`, s.context);
   await internal(s, {type: 'START_SYNC', requestId}); await idle(s);
@@ -428,5 +463,17 @@ async function popupScenario(initialState, {respond} = {}) {
   check(p.body.dataset.state === 'error' && p.elements.run.hidden && p.elements.cancelWebsiteAction.hidden
     && p.elements.status.textContent.includes('Request expired'),
     'start rejection retains actionable feedback');
+  const plannedPopup = {...popup, majors: ['Computer Science B.S.', 'Applied Mathematics B.S.']};
+  p = await popupScenario({pendingWebsiteAction: {requestId, popup: plannedPopup}});
+  check(p.elements.majors.children.length === 2 && p.elements.majors.children[1].textContent === 'Applied Mathematics B.S.',
+    'confirmation lists each requested major as a separate bullet');
+  check(p.elements.syncProgress.max === 10 && p.elements.syncProgress.value === 0 && p.elements.safeCloseNote.hidden,
+    'two-major confirmation plans ten steps without promising background work before confirmation');
+  await p.update({lastRun: {requestId, popup: plannedPopup, status: 'running', step: 'Running CS…', progress: {current: 4, total: 10}}});
+  check(p.elements.progressLabel.textContent === 'Step 4 of 10' && p.elements.syncProgress.value === 4 && !p.elements.safeCloseNote.hidden,
+    'active sync shows its numbered progress and safe-to-close guidance');
+  await p.update({lastRun: {requestId, popup: plannedPopup, status: 'error', message: 'GOLD unavailable', progress: {current: 4, total: 10}}});
+  check(p.elements.progressLabel.textContent === 'Stopped at step 4 of 10' && p.elements.safeCloseNote.hidden,
+    'error retains the failed stage without implying the sync is still running');
   console.log(`${passed} extension checks passed`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });

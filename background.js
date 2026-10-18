@@ -58,6 +58,8 @@ chrome.runtime.onInstalled.addListener(() => {
   ]);
 });
 
+chrome.action.onClicked.addListener(() => offerSync());
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId === automationTabId) {
     automationTabClosed = true;
@@ -108,7 +110,18 @@ async function recoverInterruptedRun() {
 
 async function offerSync() {
   try {
-    await chrome.action.openPopup();
+    const {syncWindowId} = await chrome.storage.session.get('syncWindowId');
+    if (syncWindowId != null) {
+      try {
+        await chrome.windows.update(syncWindowId, {focused: true});
+        return true;
+      } catch { /* The user closed the previous sync window. */ }
+    }
+    // Toolbar popups are dismissed by Chrome on focus changes. A small extension
+    // window stays visible while GOLD navigates; closing it never cancels the worker.
+    const window = await chrome.windows.create({url: chrome.runtime.getURL('popup.html'),
+      type: 'popup', width: 400, height: 560, focused: true});
+    await chrome.storage.session.set({syncWindowId: window.id});
     return true;
   } catch {
     // Chrome refuses this unless its window is focused, so fall back to a badge
@@ -290,6 +303,7 @@ async function runSync(action, requestId) {
       status: "running",
       requestId,
       popup: null,
+      progress: null,
       action,
       step: "Checking your UCSBPlat sign-in…",
       message: "",
@@ -300,7 +314,9 @@ async function runSync(action, requestId) {
     if (job.action !== action || !["pending", "running"].includes(job.status) || !validPopup(job.popup)) {
       throw new Error("This request is no longer available. Start a new update from your profile.");
     }
-    await setRun({ popup: job.popup });
+    const majorCount = Array.isArray(job.audits) ? job.audits.length : 1;
+    const totalSteps = 4 + 3 * majorCount;
+    await setRun({popup: job.popup, progress: {current: 1, total: totalSteps}});
     const profile = await requireSignedIn();
     // The request owns both dropdown selections, including the first major import.
     const savedSelection = job.audit_selection ?? (action === ACTION_ADD_MAJOR ? null : profile?.student?.audit_selection);
@@ -309,7 +325,9 @@ async function runSync(action, requestId) {
     }
 
     await setRun({ step: "Opening GOLD…" });
-    const tab = await chrome.tabs.create({ url: GOLD_SCHEDULE_URL, active: false });
+    // Keep automation in a normal browser window, never in the persistent sync UI.
+    const sourceWindow = await chrome.windows.getLastFocused({windowTypes: ['normal']});
+    const tab = await chrome.tabs.create({url: GOLD_SCHEDULE_URL, active: false, windowId: sourceWindow.id});
     tabId = tab.id;
     automationTabId = tabId;
     await chrome.storage.session.set({ automationTabId: tabId });
@@ -321,11 +339,12 @@ async function runSync(action, requestId) {
       if (!job.audits.length || job.audits.some((audit) => !audit.audit_selection)) {
         throw new Error('UCSBPlat did not provide the saved major selections. Start a new update.');
       }
-      const schedule = await captureSchedule(tabId, warnings);
+      const schedule = await captureSchedule(tabId, warnings, false, totalSteps);
       const captures = [];
       for (const [index, target] of job.audits.entries()) {
-        await setRun({ step: `Preparing major ${index + 1} of ${job.audits.length}: ${target.label}…` });
-        const audit = await captureAudit(tabId, warnings, target.audit_selection, true);
+        await setRun({step: `Preparing major ${index + 1} of ${job.audits.length}: ${target.label}…`,
+          progress: {current: 3 + 3 * index, total: totalSteps}});
+        const audit = await captureAudit(tabId, warnings, target.audit_selection, true, {index, total: totalSteps});
         captures.push({audit_id: target.audit_id, major_progress_check: audit.html ?? '',
           ...(audit.selection ? {audit_selection: audit.selection} : {})});
       }
@@ -333,18 +352,19 @@ async function runSync(action, requestId) {
         throw new Error("Couldn't capture any GOLD pages. Your saved data was kept.");
       }
       throwIfTabClosed();
-      await setRun({step: 'Saving your schedule and major progress to UCSBPlat…'});
+      await setRun({step: 'Saving your schedule and major progress to UCSBPlat…', progress: {current: totalSteps - 1, total: totalSteps}});
       throwIfTabClosed();
       await submit({schedule_page: schedule.html ?? '', major_progress_checks: captures, action, request_id: requestId},
-        {warnings, action, requestId});
+        {warnings, action, requestId, totalSteps});
       return;
     }
-    const schedule = await captureSchedule(tabId, warnings);
+    const schedule = await captureSchedule(tabId, warnings, false, totalSteps);
     const audit = await captureAudit(
       tabId,
       warnings,
       savedSelection,
       true,
+      {index: 0, total: totalSteps},
     );
     if (action !== ACTION_SYNC_ALL && !audit.html) {
       throw new Error(audit.error || "Couldn't capture that major's progress check. Your saved majors were not changed.");
@@ -357,7 +377,7 @@ async function runSync(action, requestId) {
     }
 
     throwIfTabClosed();
-    await setRun({ step: "Sending to UCSBPlat…" });
+    await setRun({step: "Saving to UCSBPlat…", progress: {current: totalSteps - 1, total: totalSteps}});
     throwIfTabClosed();
     await submit(
       {
@@ -367,7 +387,7 @@ async function runSync(action, requestId) {
         action,
         ...(requestId ? { request_id: requestId } : {}),
       },
-      { quarter: schedule.quarter, warnings, action, requestId },
+      { quarter: schedule.quarter, warnings, action, requestId, totalSteps },
     );
   } catch (error) {
     await reportFailure(error);
@@ -380,13 +400,13 @@ async function runSync(action, requestId) {
   }
 }
 
-async function captureSchedule(tabId, warnings, navigateToSchedule = false) {
+async function captureSchedule(tabId, warnings, navigateToSchedule = false, totalSteps = 7) {
   try {
     if (navigateToSchedule) {
       await setRun({ step: "Opening your schedule…" });
       await navigate(tabId, GOLD_SCHEDULE_URL);
     }
-    await setRun({ step: "Checking your current courses…" });
+    await setRun({step: "Checking your current courses…", progress: {current: 2, total: totalSteps}});
     // The Dean's Letter may still be covering the schedule on a first visit.
     // Dismissing it is harmless when the audit already cleared it.
     await dismissGate(tabId);
@@ -401,8 +421,9 @@ async function captureSchedule(tabId, warnings, navigateToSchedule = false) {
   }
 }
 
-async function captureAudit(tabId, warnings, savedSelection, navigateToAudit = true) {
+async function captureAudit(tabId, warnings, savedSelection, navigateToAudit = true, plan = {index: 0, total: 7}) {
   try {
+    await setRun({progress: {current: 3 + 3 * plan.index, total: plan.total}});
     if (navigateToAudit) {
       await setRun({ step: "Opening the major progress check…" });
       await navigate(tabId, GOLD_AUDIT_URL);
@@ -422,7 +443,7 @@ async function captureAudit(tabId, warnings, savedSelection, navigateToAudit = t
     await waitForSelection(tabId);
     assertRequestedSelection(await readAuditSelection(tabId), selection);
 
-    await setRun({ step: `Running the major progress check for ${majorName}…` });
+    await setRun({step: `Running the major progress check for ${majorName}…`, progress: {current: 4 + 3 * plan.index, total: plan.total}});
     const token = newToken();
     await inject(tabId, markDocument, [token, true]);
     const runButton = await inject(tabId, clickRunAudit);
@@ -431,7 +452,7 @@ async function captureAudit(tabId, warnings, savedSelection, navigateToAudit = t
     }
     await waitForResults(tabId, token);
 
-    await setRun({ step: `Reading requirements for ${majorName}…` });
+    await setRun({step: `Reading requirements for ${majorName}…`, progress: {current: 5 + 3 * plan.index, total: plan.total}});
     await inject(tabId, clickExpandAll);
     await waitForDomSettle(tabId);
 
@@ -533,7 +554,8 @@ async function submit(payload, context, confirmMajorChange = false) {
       throw new Error("UCSBPlat did not return a saved result. Check your profile before retrying.");
     }
     awaitingConfirmation = null;
-    await setRun({ status: data.status === "partial" ? "partial" : "success", step: "", message: data.message ?? "Update saved.", finishedAt: Date.now() });
+    await setRun({ status: data.status === "partial" ? "partial" : "success", step: "", message: data.message ?? "Update saved.",
+      ...(context.totalSteps ? {progress: {current: context.totalSteps, total: context.totalSteps}} : {}), finishedAt: Date.now() });
     return;
   }
 
@@ -732,15 +754,20 @@ async function inject(tabId, func, args = []) {
 }
 
 async function setRun(patch) {
+  const { lastRun = {} } = await chrome.storage.local.get("lastRun");
   if (activeRequestId && (["running", "error", "signin", "cancelled"].includes(patch.status)
       || (!patch.status && patch.step))) {
     const job = await reportWebsiteStatus(activeRequestId, patch.status === "signin" ? "error" : patch.status || 'running',
-      patch.message || patch.step || "Working in GOLD…");
+      patch.message || patch.step || "Working in GOLD…", patch.progress ?? lastRun.progress);
     if (["success", "partial"].includes(job?.status)) {
-      patch = { ...patch, status: job.status, message: job.message, step: "", finishedAt: Date.now() };
+      patch = {...patch, status: job.status, message: job.message, step: '',
+        ...(job.progress ? {progress: job.progress} : {}), finishedAt: Date.now()};
     }
   }
-  const { lastRun = {} } = await chrome.storage.local.get("lastRun");
+  if (['success', 'partial'].includes(patch.status)) {
+    const progress = patch.progress ?? lastRun.progress;
+    if (progress) patch.progress = {...progress, current: progress.total};
+  }
   await chrome.storage.local.set({ lastRun: { ...lastRun, ...patch } });
 }
 
@@ -764,11 +791,11 @@ async function getWebsiteRequest(requestId) {
   return job;
 }
 
-async function reportWebsiteStatus(requestId, status, message) {
+async function reportWebsiteStatus(requestId, status, message, progress = null) {
   try {
     const response = await websiteFetch(`${UCSBPLAT_ORIGIN}/api/extension/sync-requests/${requestId}`, {
       method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status, message }),
+      body: JSON.stringify({status, message, ...(progress ? {progress} : {})}),
     }, 5000);
     return response.ok ? readJson(response) : null;
   } catch {
