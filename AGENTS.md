@@ -117,7 +117,10 @@ requested audit's selectors. Add-major requires both labels entered on the websi
 them to actual GOLD options, and saves both values and labels. Full sync captures current
 courses once and visits every server-requested saved audit. Always select the first dropdown,
 wait for the dependent list, select the second, verify the pair, check in-progress, and wait
-for fresh results (not an old grid). Value mismatches and ambiguous labels must fail.
+for fresh results (not an old grid). Pre-run value mismatches and ambiguous labels must fail.
+GOLD can reset both dropdowns after Run: do not validate the controls again after results
+arrive. Keep the verified pre-run selector pair and let the server check the generated
+audit's parsed PROGRAM CODE against the requested saved major.
 Release v1.4 requires the matching protocol-v5 website; it reuses existing DB columns/tables.
 Keep both `check.cjs` and `check-browser.cjs` out of release archives. The browser harness uses
 synthetic controls only; see README for verification and remaining real-GOLD checks.

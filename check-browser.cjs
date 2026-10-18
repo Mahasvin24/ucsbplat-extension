@@ -47,6 +47,9 @@ const fixture = `<!doctype html><html><body>
         document.querySelector('#pageContent_processingAuditPanel').style.display = 'block';
         setTimeout(() => {
           document.querySelector('#pageContent_pageContent_DA_GridPlaceHolderRadGrid').innerHTML = '<p>Fresh computer science result</p>';
+          // GOLD can reset both controls even though the returned audit is correct.
+          document.querySelector('#pageContent_availableMajorsList').value = 'LS';
+          document.querySelector('#pageContent_availableAuditsList').innerHTML = '<option value="MATH-BS">BS - Applied Mathematics</option>';
           document.querySelector('#pageContent_processingAuditPanel').style.display = 'none';
         }, 200);
       });
@@ -80,6 +83,8 @@ const fixture = `<!doctype html><html><body>
     await page.waitForFunction(() => auditReadyState('run-1').freshResults && !auditReadyState('run-1').running);
     const run = await page.evaluate(() => window.runs[0]);
     check(run.area === 'ENGR' && run.audit === 'CMPSC-BS' && run.checked, 'run uses the exact requested pair with in-progress included');
+    check((await page.evaluate(() => auditSelectionState())).audit.value === 'MATH-BS',
+      'synthetic GOLD resets its dropdowns while retaining the requested computer science output');
     check((await page.evaluate(() => capturePage())).includes('Fresh computer science result'), 'capture contains fresh audit output');
     await page.evaluate(() => markDocument('run-2', true));
     await page.evaluate(() => {document.querySelector('#unrelated').textContent = 'Changed outside the audit';});

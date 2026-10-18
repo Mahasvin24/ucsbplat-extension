@@ -10,7 +10,8 @@ const requestId = '11111111-1111-4111-8111-111111111111';
 function setup({getStatus = 200, action = 'add_major', postStatus = 200, resultStatus = 'success',
   auditFails = false, closeAt = null, missingTab = false, hangAt = null, hangChromeAt = null,
   closeDuringPost = false, committedThenLost = false, initialLocal = {}, audits = null,
-  wrongSelection = false, unchecked = false, failAuditValue = null, staleResults = 0, closeAuditValue = null} = {}) {
+  wrongSelection = false, unchecked = false, failAuditValue = null, staleResults = 0, closeAuditValue = null,
+  resetSelectionAfterRun = false} = {}) {
   const storage = {local: {...initialLocal}, session: {}};
   let tabExists = !missingTab;
   let shouldClose = closeAt;
@@ -72,7 +73,10 @@ function setup({getStatus = 200, action = 'add_major', postStatus = 200, resultS
         case 'scheduleState': result = {found: true, quarter: 'FALL 2026'}; break;
         case 'auditSelectionState': result = {found: true, ready: true, signature: JSON.stringify(selected), majorArea: selected.major_area, audit: selected.audit}; break;
         case 'ensureInProgressChecked': result = {found: !auditFails, checked: !auditFails && !unchecked}; break;
-        case 'clickRunAudit': result = {found: true}; break;
+        case 'clickRunAudit':
+          if (resetSelectionAfterRun) selected = {major_area: {value: 'DEFAULT', label: 'Other major'}, audit: {value: 'DEFAULT-BS', label: 'Other progress check'}};
+          result = {found: true};
+          break;
         case 'auditReadyState': result = {hasResults: true, freshResults: staleResults-- <= 0, running: false}; break;
         case 'dismissWelcomeLetter': result = {clicked: false}; break;
         case 'domSize': result = 1; break;
@@ -220,6 +224,15 @@ async function popupScenario(initialState, {respond} = {}) {
   check(s.calls.reports.some((report) => report.message.includes('BS - Applied Mathematics')),
     'website receives live major progress as well as the popup');
   check(!JSON.stringify(s.storage).includes('<html>'), 'multi-major HTML remains in memory only');
+  for (const action of ['add_major', 'refresh_major', 'sync_all']) {
+    s = setup({action, resetSelectionAfterRun: true, ...(action === 'sync_all' ? {audits: targets} : {})});
+    await vm.runInContext(`runSync('${action}', '${requestId}')`, s.context);
+    const captures = s.calls.posts[0]?.major_progress_checks ?? [s.calls.posts[0]];
+    check(s.storage.local.lastRun.status === 'success' && captures[0]?.audit_selection.audit.value === 'CMPSC-BS',
+      `${action}: post-run dropdown reset does not invalidate the generated audit or overwrite its pre-run selection`);
+    if (action === 'sync_all') check(captures[1]?.audit_selection.audit.value === 'MATH-BS',
+      'next major is explicitly restored after GOLD resets the previous dropdowns');
+  }
   s = setup({action: 'sync_all', audits: targets, failAuditValue: 'MATH-BS', resultStatus: 'partial'});
   await vm.runInContext(`runSync('sync_all', '${requestId}')`, s.context);
   check(s.calls.posts[0].major_progress_checks[1].major_progress_check === '' && s.storage.local.lastRun.status === 'partial',

@@ -435,7 +435,9 @@ async function captureAudit(tabId, warnings, savedSelection, navigateToAudit = t
     await inject(tabId, clickExpandAll);
     await waitForDomSettle(tabId);
 
-    assertRequestedSelection(await readAuditSelection(tabId), selection);
+    // GOLD may reset its dropdowns after generating the requested audit. Bind the
+    // capture to the verified pre-run pair; the server validates the audit's own
+    // parsed PROGRAM CODE against the requested saved major.
     await setRun({ step: `Collecting the progress check for ${majorName}…` });
     return { html: await inject(tabId, capturePage), selection };
   } catch (error) {

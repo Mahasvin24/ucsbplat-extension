@@ -16,6 +16,8 @@ Opening the toolbar popup directly links to your profile; it cannot start a stan
    values and labels, ticks "use in-progress courses", clicks **Run This Progress Check**, waits for
    fresh audit to render, clicks **Expand All**, and captures the page. Old results do not count
    as completion; full navigation and AJAX grid replacement/content updates are supported.
+   GOLD may reset the dropdowns after running. The capture retains the verified pre-run
+   selections; the generated audit's own PROGRAM CODE validates the saved major's identity.
 4. Posts the schedule once and the requested audit captures to `/api/extension/gold-sync`, then
    closes the tab. `sync_all` sends `{schedule_page, major_progress_checks: [{audit_id,
    major_progress_check, audit_selection}], action, request_id}`. Add/refresh sends one audit.
