@@ -316,7 +316,7 @@ async function popupScenario(initialState, {respond} = {}) {
   await p.update({lastRun: {requestId, popup, status: 'confirm'}, pendingChange: {requestId, message: 'Website asks for major replacement'}});
   check(!p.elements.confirm.hidden && p.elements.confirmMessage.textContent === 'Website asks for major replacement', 'major-change prompt uses website message');
   p = await popupScenario({lastRun: {requestId, popup, status: 'running'}});
-  check(!p.elements.websiteAction.hidden && p.elements.status.textContent === popup.running_message, 'reopening during a run resumes website action');
+  check(p.body.dataset.state === 'running' && p.elements.status.textContent === popup.running_message, 'reopening during a run resumes website action');
   await p.update({lastRun: {requestId, popup, status: 'error', message: 'The GOLD tab was closed.'}});
   check(p.elements.run.hidden && p.elements.status.textContent.includes('GOLD tab was closed'), 'closed tab presents failure and website link without standalone retry');
 
@@ -329,6 +329,8 @@ async function popupScenario(initialState, {respond} = {}) {
       await p.update({lastRun: {requestId, popup: copy, status, message: `Server ${status}`}});
       check(p.body.dataset.state === status && p.elements.run.hidden && p.elements.confirm.hidden,
         `${action} ${status} has a distinct state without an unintended confirmation`);
+      check(p.elements.websiteAction.hidden && p.elements.intro.hidden,
+        `${action} ${status} focuses on the outcome instead of repeating the initial question`);
       check(p.elements.status.textContent === (status === 'running' ? copy.running_message : `Server ${status}`),
         `${action} ${status} preserves website copy`);
       check(p.elements.statusHint.hidden === !['success', 'partial', 'signin'].includes(status),
@@ -353,7 +355,8 @@ async function popupScenario(initialState, {respond} = {}) {
     && p.messages.filter((m) => m.type === 'START_SYNC').length === 1, 'starting feedback blocks duplicate confirmation and cancellation');
   releaseStart({started: false, message: 'Request expired. Start again from your profile.'});
   await click;
-  check(p.body.dataset.state === 'error' && p.elements.status.textContent.includes('Request expired'),
+  check(p.body.dataset.state === 'error' && p.elements.run.hidden && p.elements.cancelWebsiteAction.hidden
+    && p.elements.status.textContent.includes('Request expired'),
     'start rejection retains actionable feedback');
   console.log(`${passed} extension checks passed`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });

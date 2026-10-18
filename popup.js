@@ -18,6 +18,14 @@ const labels = {
 
 function showStatus(status, message = "") {
   document.body.dataset.state = status;
+  els.intro.hidden = status !== "idle";
+  els.websiteAction.hidden = !["prepared", "starting"].includes(status);
+  if (status === "error") {
+    preparedAction = null;
+    els.run.hidden = true;
+    els.cancelWebsiteAction.hidden = true;
+    els.confirm.hidden = true;
+  }
   els.stateLabel.textContent = labels[status] ?? labels.error;
   els.status.textContent = message;
   els.status.hidden = !message;
@@ -91,8 +99,6 @@ async function render() {
   const relevantRun = viewRequestId && lastRun.requestId === viewRequestId ? lastRun : {};
   const popup = preparedAction?.popup ?? relevantRun.popup;
   const confirming = relevantRun.status === "confirm" && pendingChange?.requestId === viewRequestId;
-  els.intro.hidden = Boolean(popup);
-  els.websiteAction.hidden = !popup;
   els.websiteActionTitle.textContent = popup?.title ?? "";
   els.websiteActionDetail.textContent = popup?.detail ?? "";
   els.run.hidden = !preparedAction;
