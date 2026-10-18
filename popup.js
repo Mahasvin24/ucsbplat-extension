@@ -55,7 +55,10 @@ function renderPlan(popup, run, status) {
   }
 }
 
-els.website.addEventListener("click", () => chrome.tabs.create({ url: `${UCSBPLAT_ORIGIN}/profile/` }));
+els.website.addEventListener("click", async () => {
+  const sourceWindow = await chrome.windows.getLastFocused({windowTypes: ['normal']});
+  await chrome.tabs.create({url: `${UCSBPLAT_ORIGIN}/profile/`, windowId: sourceWindow.id});
+});
 async function send(type, extra = {}) {
   try {
     return await chrome.runtime.sendMessage({ type, ...extra });

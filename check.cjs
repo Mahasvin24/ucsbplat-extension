@@ -160,6 +160,7 @@ async function popupScenario(initialState, {respond} = {}) {
       }},
       storage: {onChanged: {addListener: (fn) => storageListeners.push(fn)}},
       action: {setBadgeText() {}}, tabs: {create: (tab) => tabs.push(tab)},
+      windows: {getLastFocused: async () => ({id: 10})},
     },
     UCSBPLAT_ORIGIN: 'https://ucsbplat.com',
   });
@@ -281,6 +282,9 @@ async function popupScenario(initialState, {respond} = {}) {
   check(s.calls.posts.length === 0 && s.storage.local.lastRun.status === 'error', 'failed add-major capture does not submit schedule-only success');
   s = setup({getStatus: 403}); await vm.runInContext(`runSync('add_major', '${requestId}')`, s.context);
   check(s.calls.tabs === 0 && s.storage.local.lastRun.status === 'error', 'rejected preflight stops before GOLD');
+  s = setup({getStatus: 401}); await vm.runInContext(`runSync('add_major', '${requestId}')`, s.context);
+  check(s.storage.local.lastRun.status === 'signin' && s.calls.tabOptions[0].windowId === 10
+    && s.calls.tabOptions[0].active === false, 'sign-in recovery keeps the extension window visible');
   s = setup(); await vm.runInContext(`prepareWebsiteAction('add_major', '${requestId}')`, s.context);
   await new Promise((resolve) => s.listeners.internal({type: 'CANCEL_WEBSITE_ACTION'}, {}, resolve));
   check(!s.storage.session.pendingWebsiteAction && s.calls.reports[0].status === 'cancelled', 'prepared cancellation reaches website');
@@ -401,7 +405,7 @@ async function popupScenario(initialState, {respond} = {}) {
   check(!p.elements.intro.hidden && p.elements.run.hidden && p.elements.websiteAction.hidden, 'raw popup directs to website with no standalone action');
   check(!p.elements.website.hidden, 'empty toolbar popup offers the website entry point');
   check(p.elements.status.textContent === '' && !('summary' in p.elements), 'raw popup does not show past sync details');
-  p.elements.website.events.click();
+  await p.elements.website.events.click();
   check(p.tabs[0].url === 'https://ucsbplat.com/profile/', 'website link opens profile');
   s = setup();
   const popup = s.job.popup;

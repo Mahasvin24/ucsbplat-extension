@@ -42,8 +42,8 @@ The last paragraph is deliberate. The name and icon use UCSB's marks, and saying
 that this is a sponsored student project rather than a University service answers the
 question a reviewer would otherwise open a rejection to ask.
 
-All syncs begin on the UCSBPlat website. Opening the toolbar popup directly directs the
-student there. The popup displays the website's requested action and simple status;
+All syncs begin on the UCSBPlat website. Opening the toolbar opens a persistent sync window with an idle link to the
+website. The window displays the website's requested action and simple status;
 saved course details and warnings appear on the website. No reminders open the popup.
 
 **Privacy policy URL:** `https://ucsbplat.com/privacy`
@@ -167,7 +167,7 @@ image is public, and a real transcript is the one thing that must never be in on
 4. The published extension gets a permanent ID different from the unpacked one. Add it to
    `EXTENSION_ID` on the server, or the API will answer 403 — see the README.
 
-## Website actions (v1.4 / protocol v5)
+## Website actions (v1.5 / protocol v5)
 
 Website-initiated add-major, full-update, and selected-major-refresh actions use an
 account-scoped server request and require confirmation in the extension popup. The server
@@ -179,3 +179,7 @@ without a valid website request, and closing the GOLD tab ends capture with a re
 actions collect the same two GOLD pages and academic fields described above, add no
 permissions, and never store captured HTML. Deploy the updated privacy policy before
 submitting this release. Both development harnesses (`check.cjs`, `check-browser.cjs`) are excluded by `package.sh`.
+
+Release v1.5 uses a dark persistent sync window with bullet-listed majors and numbered
+native progress. Closing the sync window leaves the worker active. GOLD opens separately
+in the normal browser window. No permissions or collected fields are added.

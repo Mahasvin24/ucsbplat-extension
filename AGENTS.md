@@ -121,6 +121,11 @@ for fresh results (not an old grid). Pre-run value mismatches and ambiguous labe
 GOLD can reset both dropdowns after Run: do not validate the controls again after results
 arrive. Keep the verified pre-run selector pair and let the server check the generated
 audit's parsed PROGRAM CODE against the requested saved major.
-Release v1.4 requires the matching protocol-v5 website; it reuses existing DB columns/tables.
+Release v1.5 requires the matching protocol-v5 website; it reuses existing DB columns/tables.
 Keep both `check.cjs` and `check-browser.cjs` out of release archives. The browser harness uses
 synthetic controls only; see README for verification and remaining real-GOLD checks.
+
+The toolbar uses a persistent `chrome.windows` popup, not `action.default_popup`. Reuse it
+when open; closing only this UI must not cancel the worker. Create GOLD and sign-in tabs
+in a normal browser window. Native progress uses 4 + 3 × requested major count, shared
+with website receipts. Only server success/partial reaches the final completed step.

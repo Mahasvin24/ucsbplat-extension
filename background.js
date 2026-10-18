@@ -124,8 +124,7 @@ async function offerSync() {
     await chrome.storage.session.set({syncWindowId: window.id});
     return true;
   } catch {
-    // Chrome refuses this unless its window is focused, so fall back to a badge
-    // rather than losing the prompt entirely.
+    // Keep a toolbar indicator if Chrome cannot create or focus the sync window.
     try {
       await chrome.action.setBadgeText({ text: "•" });
       await chrome.action.setBadgeBackgroundColor({ color: "#003660" });
@@ -654,7 +653,10 @@ function missingSessionError() {
 async function reportFailure(error) {
   if (error instanceof AuthError) {
     await setRun({ status: "signin", step: "", message: error.message, finishedAt: Date.now() });
-    if (error.openSignIn) await chrome.tabs.create({ url: UCSBPLAT_ORIGIN });
+    if (error.openSignIn) {
+      const sourceWindow = await chrome.windows.getLastFocused({windowTypes: ['normal']}).catch(() => null);
+      if (sourceWindow) await chrome.tabs.create({url: UCSBPLAT_ORIGIN, windowId: sourceWindow.id, active: false}).catch(() => {});
+    }
     return;
   }
   await setRun({ status: "error", step: "", message: reason(error), finishedAt: Date.now() });
