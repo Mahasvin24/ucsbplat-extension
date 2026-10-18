@@ -25,9 +25,15 @@ export function documentState(token) {
 }
 
 export function scheduleState() {
-  const dropdown = document.querySelector("#ctl00_pageContent_quarterDropDown");
+  const dropdown = document.querySelector('[id="ctl00_pageContent_quarterDropDown"], [id="pageContent_quarterDropDown"]');
+  const grid = document.querySelector('[id="ctl00_pageContent_ScheduleGrid"], [id="pageContent_ScheduleGrid"]');
+  const units = document.querySelector('[id="ctl00_pageContent_totalUnitsScheduleWaitlistLabel"], [id="pageContent_totalUnitsScheduleWaitlistLabel"]');
+  const busy = Array.from(document.querySelectorAll('.raDiv, .RadAjaxLoadingPanel, [aria-busy="true"]'))
+    .some(element => element.getClientRects().length > 0);
   return {
     found: !!dropdown,
+    ready: document.readyState === 'complete' && !!dropdown?.selectedOptions[0]
+      && !busy && (!!grid || /^0(?:\.0+)?(?:\s|$)/.test(units?.textContent.trim() || '')),
     quarter: dropdown?.selectedOptions[0]?.textContent.trim() || null,
   };
 }
@@ -134,6 +140,13 @@ export function capturePage() {
   delete document.documentElement.dataset.ucsbplatRun;
   const clone = document.documentElement.cloneNode(true);
   for (const node of clone.querySelectorAll('[data-ucsbplat-audit-run]')) delete node.dataset.ucsbplatAuditRun;
+  // HTML attributes do not track a select's current value after client-side changes.
+  const selects = document.querySelectorAll('select');
+  clone.querySelectorAll('select').forEach((select, index) => {
+    Array.from(select.options).forEach((option, optionIndex) => {
+      option.toggleAttribute('selected', selects[index].options[optionIndex].selected);
+    });
+  });
   for (const node of clone.querySelectorAll("style, script, noscript, svg")) node.remove();
   return clone.outerHTML;
 }

@@ -107,7 +107,7 @@ logs are behind the "service worker" link there.
 A prepared action carries a server-issued request ID. Resolve its action/selectors from the
 website and require popup confirmation. There is no standalone sync fallback. The server
 supplies the popup title, detail, confirm label, and fallback running message; the popup
-shows live worker steps, including the current major's name. Detailed results live
+points to the website for live worker steps. Detailed results live
 on the website. A raw toolbar opening links to the profile. Profile visits do not trigger
 reminders. Closing the automation tab must abort even a pending injection, fail the website
 request, and release the worker without submitting a partial capture. The website alone declares saved success/partial
@@ -121,11 +121,12 @@ for fresh results (not an old grid). Pre-run value mismatches and ambiguous labe
 GOLD can reset both dropdowns after Run: do not validate the controls again after results
 arrive. Keep the verified pre-run selector pair and let the server check the generated
 audit's parsed PROGRAM CODE against the requested saved major.
-Release v1.5 requires the matching protocol-v5 website; it reuses existing DB columns/tables.
+Release v1.6 requires the matching protocol-v5 website; it reuses existing DB columns/tables.
 Keep both `check.cjs` and `check-browser.cjs` out of release archives. The browser harness uses
 synthetic controls only; see README for verification and remaining real-GOLD checks.
 
-The toolbar uses a persistent `chrome.windows` popup, not `action.default_popup`. Reuse it
-when open; closing only this UI must not cancel the worker. Create GOLD and sign-in tabs
-in a normal browser window. Native progress uses 4 + 3 × requested major count, shared
-with website receipts. Only server success/partial reaches the final completed step.
+The toolbar uses `action.default_popup`, never a separate `chrome.windows` popup.
+Closing the popup must not cancel the worker. Numbered progress belongs only on the
+website; the popup handles confirmation and briefly points there while running.
+Website progress uses 4 + 3 × requested majors, completed only by server success/partial.
+Schedule capture must wait for content and preserve live select values in captured HTML.

@@ -119,6 +119,23 @@ const fixture = `<!doctype html><html><body>
     check(!(await page.evaluate(() => documentState('previous-document'))).marked
       && (await page.evaluate(() => auditReadyState('previous-document'))).freshResults,
       'full document navigation also recognizes the new audit as fresh');
+    for (const prefix of ['ctl00_pageContent_', 'pageContent_']) {
+      await page.setContent(`<select id="${prefix}quarterDropDown"><option selected>Fall 2026</option><option>Spring 2027</option></select>`);
+      await page.addScriptTag({content: injected});
+      check(!(await page.evaluate(() => scheduleState())).ready, 'quarter dropdown alone does not mean schedule has loaded');
+      await page.evaluate(prefix => {
+        const grid = document.createElement('div'); grid.id = prefix + 'ScheduleGrid'; document.body.append(grid);
+        document.querySelector('select').selectedIndex = 1;
+      }, prefix);
+      check((await page.evaluate(() => scheduleState())).ready, 'loaded schedule accepts either GOLD control ID format');
+      const captured = await page.evaluate(() => new DOMParser().parseFromString(capturePage(), 'text/html').querySelector('option[selected]').textContent);
+      check(captured === 'Spring 2027', 'captured HTML preserves the live quarter selection instead of the initial default');
+      await page.evaluate(prefix => {
+        document.getElementById(prefix + 'ScheduleGrid').remove();
+        const units = document.createElement('span'); units.id = prefix + 'totalUnitsScheduleWaitlistLabel'; units.textContent = '0 Units'; document.body.append(units);
+      }, prefix);
+      check((await page.evaluate(() => scheduleState())).ready, 'explicit zero-unit schedule is a valid empty capture');
+    }
     console.log(`${passed} real-browser GOLD control checks passed`);
   } finally {
     await browser.close();

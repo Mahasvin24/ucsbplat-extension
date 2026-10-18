@@ -32,13 +32,6 @@ body[data-state="starting"] .state-label { font-size: 12px; color: var(--muted);
 .majors-section ul { margin: 7px 0 0; padding-left: 19px; }
 .majors-section li { padding-left: 2px; margin-top: 5px; }
 .majors-section li::marker { color: var(--accent); }
-.progress-area { margin-top: 23px; }
-.progress-caption { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
-.progress-caption > :first-child { color: var(--ink); font-weight: 550; }
-progress { display: block; width: 100%; height: 6px; margin-top: 9px; border: 0; border-radius: 6px; overflow: hidden; background: var(--line); accent-color: var(--state-ink); }
-progress::-webkit-progress-bar { background: var(--line); border-radius: 6px; }
-progress::-webkit-progress-value { background: var(--state-ink); border-radius: 6px; }
-progress::-moz-progress-bar { background: var(--state-ink); border-radius: 6px; }
 .safe-close-note { margin-top: 15px; color: var(--muted); font-size: 11px; line-height: 1.65; }
 .request-actions { display: flex; flex-direction: row-reverse; align-items: center; gap: 12px; }
 .request-actions:has(> :not([hidden])) { margin-top: 25px; padding-top: 18px; border-top: 1px solid var(--line); }
@@ -56,4 +49,4 @@ body[data-state="success"] { --state-ink: #8ad3af; }
 body[data-state="partial"], body[data-state="confirm"] { --state-ink: #ecc782; }
 body[data-state="error"], body[data-state="signin"] { --state-ink: #f1a0a5; }
 body[data-state="cancelled"], body[data-state="expired"] { --state-ink: var(--muted); }
-@media (forced-colors: active) { .button { border: 1px solid ButtonText; } progress { border: 1px solid CanvasText; } }
+@media (forced-colors: active) { .button { border: 1px solid ButtonText; } }

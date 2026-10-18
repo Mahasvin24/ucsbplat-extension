@@ -11,7 +11,7 @@ function setup({getStatus = 200, action = 'add_major', postStatus = 200, resultS
   auditFails = false, closeAt = null, missingTab = false, hangAt = null, hangChromeAt = null,
   closeDuringPost = false, committedThenLost = false, initialLocal = {}, audits = null,
   wrongSelection = false, unchecked = false, failAuditValue = null, staleResults = 0, closeAuditValue = null,
-  resetSelectionAfterRun = false} = {}) {
+  resetSelectionAfterRun = false, scheduleDelay = 0} = {}) {
   const storage = {local: {...initialLocal}, session: {}};
   let tabExists = !missingTab;
   let shouldClose = closeAt;
@@ -34,7 +34,7 @@ function setup({getStatus = 200, action = 'add_major', postStatus = 200, resultS
   });
   const chrome = {
     runtime: {
-      id: 'synthetic', getManifest: () => ({version: '1.5'}), getURL: name => `chrome-extension://synthetic/${name}`,
+      id: 'synthetic', getManifest: () => ({version: '1.6'}), getURL: name => `chrome-extension://synthetic/${name}`,
       onInstalled: {addListener() {}},
       onMessageExternal: {addListener: (fn) => { listeners.external = fn; }},
       onMessage: {addListener: (fn) => { listeners.internal = fn; }},
@@ -77,7 +77,7 @@ function setup({getStatus = 200, action = 'add_major', postStatus = 200, resultS
       let result;
       switch (func.name) {
         case 'documentState': result = {ready: true, marked: false}; break;
-        case 'scheduleState': result = {found: true, quarter: 'FALL 2026'}; break;
+        case 'scheduleState': result = {found: true, ready: scheduleDelay-- <= 0, quarter: 'FALL 2026'}; break;
         case 'auditSelectionState': result = {found: true, ready: true, signature: JSON.stringify(selected), majorArea: selected.major_area, audit: selected.audit}; break;
         case 'ensureInProgressChecked': result = {found: !auditFails, checked: !auditFails && !unchecked}; break;
         case 'clickRunAudit':
@@ -212,13 +212,16 @@ async function popupScenario(initialState, {respond} = {}) {
   check(s.calls.posts[0].action === 'add_major' && s.calls.posts[0].request_id === requestId, 'website request carried through submission');
   check(s.calls.tabOptions[0].windowId === 10 && s.calls.tabOptions[0].active === false,
     'GOLD stays in the normal browser window without replacing the sync window');
-  check(s.calls.windowOptions.type === 'popup' && s.calls.windowOptions.url === 'chrome-extension://synthetic/popup.html',
-    'website confirmation uses a persistent extension window');
+  check(!s.calls.windowOptions && s.calls.popup === 1, 'website confirmation opens the normal toolbar popup without a new window');
   check(s.calls.runs.some(run => run.progress?.current === 2 && run.progress.total === 7)
     && s.storage.local.lastRun.progress.current === 7, 'single-major sync reports 7 numbered stages through server completion');
   check(s.calls.selections.length === 2 && s.calls.posts[0].schedule_page, 'add-major explicitly restores both requested fields and captures schedule');
   check(s.storage.local.lastRun.message === 'Website saved result.', 'popup uses website result');
   check(!JSON.stringify(s.storage).includes('<html>'), 'captured HTML never stored');
+  s = setup({scheduleDelay: 2});
+  await vm.runInContext(`runSync('add_major', '${requestId}')`, s.context);
+  check(s.calls.injections.filter(name => name === 'scheduleState').length === 3 && s.calls.posts[0].schedule_page,
+    'schedule capture polls until content is ready before capturing');
   s = setup({action: 'sync_all'}); await vm.runInContext(`runSync('sync_all', '${requestId}')`, s.context);
   check(s.calls.selections.length === 2 && s.calls.selections[1][1].value === 'CMPSC-BS', 'normal sync restores primary selectors');
   const targets = [
@@ -316,21 +319,13 @@ async function popupScenario(initialState, {respond} = {}) {
     throw new Error('worker stayed locked');
   };
   s = setup();
-  await s.listeners.toolbarClick();
-  check(s.calls.popup === 1 && s.calls.tabs === 0, 'toolbar opens a persistent view without starting a sync');
-  s = setup();
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
+  check(manifest.action.default_popup === 'popup.html', 'toolbar uses the standard Chrome popup');
   await vm.runInContext(`prepareWebsiteAction('add_major', '${requestId}')`, s.context);
-  await vm.runInContext(`prepareWebsiteAction('add_major', '${requestId}')`, s.context);
-  check(s.calls.popup === 1 && s.calls.focused === 1, 'existing sync window is focused instead of creating duplicates');
   await internal(s, {type: 'START_SYNC', requestId});
-  while (!s.calls.tabs) await new Promise(resolve => setImmediate(resolve));
-  s.listeners.closeSyncWindow();
   await idle(s);
-  check(s.calls.posts.length === 1 && s.storage.local.lastRun.status === 'success',
-    'closing the extension UI leaves the GOLD worker running to completion');
-  s.job.status = 'pending';
-  await vm.runInContext(`prepareWebsiteAction('add_major', '${requestId}')`, s.context);
-  check(s.calls.popup === 2, 'a manually closed sync window can be reopened for the next request');
+  check(s.calls.posts.length === 1 && !s.calls.windowOptions,
+    'background sync completes without any persistent extension window');
   for (const action of ['sync_all', 'add_major', 'refresh_major']) {
     for (const closeAt of ['documentState', 'scheduleState', 'auditReadyState', 'domSize']) {
       s = setup({action, closeAt});
@@ -415,16 +410,16 @@ async function popupScenario(initialState, {respond} = {}) {
   await p.elements.run.events.click();
   check(p.messages.some((m) => m.type === 'START_SYNC' && m.requestId === requestId), 'popup confirms the exact website request');
   await p.update({lastRun: {requestId, popup, status: 'running', step: 'Detailed automation step'}});
-  check(p.elements.run.hidden && p.elements.status.textContent === 'Detailed automation step', 'active popup shows the live automation step');
+  check(p.elements.run.hidden && p.elements.status.textContent === 'Follow progress on your UCSBPlat profile.', 'active popup directs progress to the website');
   await p.update({lastRun: {requestId, popup, status: 'running', step: 'Running the major progress check for BS - Applied Mathematics…'}});
-  check(p.elements.status.textContent.includes('BS - Applied Mathematics') && p.elements.website.hidden,
+  check(p.elements.status.textContent === 'Follow progress on your UCSBPlat profile.' && p.elements.website.hidden,
     'progress updates name the major without adding website navigation');
   await p.update({lastRun: {requestId, popup, status: 'partial', message: 'Website partial save message'}});
   check(p.elements.status.textContent === 'Website partial save message', 'live popup displays server partial result');
   await p.update({lastRun: {requestId, popup, status: 'confirm'}, pendingChange: {requestId, message: 'Website asks for major replacement'}});
   check(!p.elements.confirm.hidden && p.elements.website.hidden && p.elements.confirmMessage.textContent === 'Website asks for major replacement', 'major-change prompt uses website message without website navigation');
   p = await popupScenario({lastRun: {requestId, popup, status: 'running'}});
-  check(p.body.dataset.state === 'running' && p.elements.status.textContent === popup.running_message, 'reopening during a run resumes website action');
+  check(p.body.dataset.state === 'running' && p.elements.status.textContent === 'Follow progress on your UCSBPlat profile.', 'reopening during a run resumes website action');
   await p.update({lastRun: {requestId, popup, status: 'error', message: 'The GOLD tab was closed.'}});
   check(p.elements.run.hidden && p.elements.status.textContent.includes('GOLD tab was closed'), 'closed tab presents failure without standalone retry');
 
@@ -441,7 +436,7 @@ async function popupScenario(initialState, {respond} = {}) {
       check(p.elements.websiteAction.hidden && p.elements.intro.hidden,
         `${action} ${status} focuses on the outcome instead of repeating the initial question`);
       check(p.elements.website.hidden, `${action} ${status} omits website navigation`);
-      check(p.elements.status.textContent === (status === 'running' ? copy.running_message : `Server ${status}`),
+      check(p.elements.status.textContent === (status === 'running' ? 'Follow progress on your UCSBPlat profile.' : `Server ${status}`),
         `${action} ${status} preserves website copy`);
     }
   }
@@ -471,13 +466,10 @@ async function popupScenario(initialState, {respond} = {}) {
   p = await popupScenario({pendingWebsiteAction: {requestId, popup: plannedPopup}});
   check(p.elements.majors.children.length === 2 && p.elements.majors.children[1].textContent === 'Applied Mathematics B.S.',
     'confirmation lists each requested major as a separate bullet');
-  check(p.elements.syncProgress.max === 10 && p.elements.syncProgress.value === 0 && p.elements.safeCloseNote.hidden,
-    'two-major confirmation plans ten steps without promising background work before confirmation');
+  check(!('syncProgress' in p.elements) && p.elements.safeCloseNote.hidden,
+    'confirmation has no duplicate progress display');
   await p.update({lastRun: {requestId, popup: plannedPopup, status: 'running', step: 'Running CS…', progress: {current: 4, total: 10}}});
-  check(p.elements.progressLabel.textContent === 'Step 4 of 10' && p.elements.syncProgress.value === 4 && !p.elements.safeCloseNote.hidden,
-    'active sync shows its numbered progress and safe-to-close guidance');
-  await p.update({lastRun: {requestId, popup: plannedPopup, status: 'error', message: 'GOLD unavailable', progress: {current: 4, total: 10}}});
-  check(p.elements.progressLabel.textContent === 'Stopped at step 4 of 10' && p.elements.safeCloseNote.hidden,
-    'error retains the failed stage without implying the sync is still running');
+  check(p.elements.status.textContent === 'Follow progress on your UCSBPlat profile.' && !p.elements.safeCloseNote.hidden,
+    'running popup points to website progress and explains it is safe to close');
   console.log(`${passed} extension checks passed`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });

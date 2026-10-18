@@ -5,7 +5,7 @@ of the courses a student has taken and is currently taking.
 ## What a sync does
 
 Every run starts with an action on the UCSBPlat website and confirmation in the extension.
-The toolbar opens a persistent sync window. When idle it links to your profile; it cannot start a standalone sync.
+The toolbar opens the standard Chrome popup. When idle it links to your profile; it cannot start a standalone sync.
 
 1. Resolves the website request and checks sign-in (`GET /api/extension/session`). A 401 stops
    the run before GOLD opens. The request identifies every major to refresh and both of its
@@ -38,13 +38,12 @@ missing selections repairs the existing row rather than adding a duplicate.
 
 The website decides the saved result. A successful response includes `status: success`
 or `partial`, the database timestamp, stored summary/counts, and warnings. The website displays the detailed result. The popup shows only the website's action text,
-live progress (current courses, selecting a major, including in-progress courses, running
-the named major's check, and saving), and the final server message. It has no sync history, counts,
+a brief instruction to follow progress on the website, and the final server message. It has no sync history, counts,
 warnings list, or reminder settings. The extension reports running/failure/cancellation to the
 same account-scoped request; it cannot declare a save successful itself. Prepared actions
 can be cancelled in the popup. No captured HTML is written to extension storage.
 
-Release v1.5 uses protocol v5 and the corresponding website changes. No new database
+Release v1.6 uses protocol v5 and the corresponding website changes. No new database
 migration is needed; the existing selector columns and per-major audit tables are reused. A website message
 cannot start GOLD automation or read extension storage. Status receipts contain no captured
 HTML, expire on the server after 15 minutes, and are erased with course-data deletion.
@@ -123,13 +122,18 @@ or preparing another website action reconciles the stored request with the serve
 success is preserved; otherwise the interrupted request fails and can be retried from the website.
 Captured pages cannot survive a worker restart and are never restored from storage.
 
-The dark sync window stays open across focus changes and lists requested majors as bullets.
-Its native progress bar counts 4 + 3 × the number of requested majors: connection, current
-courses, three stages per major (select, run, read), saving, and completion. A two-major run
-has 10 steps. Closing this window leaves the background run active; keep the GOLD tab open.
-The toolbar reopens or focuses the same window. GOLD and sign-in pages open in the normal
-browser window. If the sync window cannot open, the website asks for a toolbar click.
-No profile-visit reminders open it. Website controls and responses live in the profile’s top-right sync panel.
+The dark toolbar popup lists requested majors as bullets and confirms the website action.
+Chrome dismisses it on focus changes; closing it leaves the background run active.
+Detailed steps and the numbered progress bar live only in the profile’s top-right sync panel.
+The website counts 4 + 3 × requested majors: connection, current courses, three stages per
+major (select, run, read), saving, and completion. A two-major run has 10 steps.
+Keep the GOLD tab open while running. If Chrome cannot open the popup, click the toolbar icon.
+No profile-visit reminders open it.
+
+Schedule capture waits for a loaded grid or an explicit zero-unit schedule, supports both
+GOLD control ID prefixes, and serializes the currently selected quarter. A missing capture
+and an unreadable schedule produce distinct website warnings. These warnings are separate
+from major selector storage; missing database columns would cause a database error instead.
 
 ## Files
 

@@ -58,8 +58,6 @@ chrome.runtime.onInstalled.addListener(() => {
   ]);
 });
 
-chrome.action.onClicked.addListener(() => offerSync());
-
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId === automationTabId) {
     automationTabClosed = true;
@@ -110,21 +108,10 @@ async function recoverInterruptedRun() {
 
 async function offerSync() {
   try {
-    const {syncWindowId} = await chrome.storage.session.get('syncWindowId');
-    if (syncWindowId != null) {
-      try {
-        await chrome.windows.update(syncWindowId, {focused: true});
-        return true;
-      } catch { /* The user closed the previous sync window. */ }
-    }
-    // Toolbar popups are dismissed by Chrome on focus changes. A small extension
-    // window stays visible while GOLD navigates; closing it never cancels the worker.
-    const window = await chrome.windows.create({url: chrome.runtime.getURL('popup.html'),
-      type: 'popup', width: 400, height: 560, focused: true});
-    await chrome.storage.session.set({syncWindowId: window.id});
+    await chrome.action.openPopup();
     return true;
   } catch {
-    // Keep a toolbar indicator if Chrome cannot create or focus the sync window.
+    // Keep a toolbar indicator if Chrome cannot open the popup.
     try {
       await chrome.action.setBadgeText({ text: "•" });
       await chrome.action.setBadgeBackgroundColor({ color: "#003660" });
@@ -324,7 +311,7 @@ async function runSync(action, requestId) {
     }
 
     await setRun({ step: "Opening GOLD…" });
-    // Keep automation in a normal browser window, never in the persistent sync UI.
+    // Keep automation in a normal browser window.
     const sourceWindow = await chrome.windows.getLastFocused({windowTypes: ['normal']});
     const tab = await chrome.tabs.create({url: GOLD_SCHEDULE_URL, active: false, windowId: sourceWindow.id});
     tabId = tab.id;
@@ -409,8 +396,17 @@ async function captureSchedule(tabId, warnings, navigateToSchedule = false, tota
     // The Dean's Letter may still be covering the schedule on a first visit.
     // Dismissing it is harmless when the audit already cleared it.
     await dismissGate(tabId);
-    const state = await inject(tabId, scheduleState);
-    if (!state.found) throw new Error("the page didn't look like GOLD's schedule");
+    const deadline = Date.now() + 30_000;
+    let state;
+    while (Date.now() < deadline) {
+      state = await inject(tabId, scheduleState);
+      if (state.ready) break;
+      await assertOnGold(tabId);
+      await sleep(300);
+    }
+    if (!state?.ready) throw new Error(state?.found
+      ? "GOLD's schedule content did not finish loading"
+      : "the page didn't show GOLD's schedule controls");
     return { html: await inject(tabId, capturePage), quarter: state.quarter };
   } catch (error) {
     if (error instanceof AutomationTabClosedError) throw error;

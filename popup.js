@@ -3,7 +3,7 @@ import { UCSBPLAT_ORIGIN } from "./config.js";
 const els = Object.fromEntries([
   "intro", "websiteAction", "websiteActionTitle", "websiteActionDetail", "status", "stateLabel",
   "run", "cancelWebsiteAction", "confirm", "confirmMessage", "confirmYes", "confirmNo", "website",
-  "majorsSection", "majors", "progressArea", "progressLabel", "syncProgress", "safeCloseNote",
+  "majorsSection", "majors", "safeCloseNote",
 ].map((id) => [id, document.getElementById(id)]));
 let preparedAction = null;
 let viewRequestId = null;
@@ -34,7 +34,7 @@ function showStatus(status, message = "") {
   els.status.hidden = !message;
 }
 
-function renderPlan(popup, run, status) {
+function renderPlan(popup, status) {
   const majors = Array.isArray(popup?.majors) ? popup.majors : [];
   els.majors.replaceChildren(...majors.map((name) => {
     const item = document.createElement('li');
@@ -42,17 +42,6 @@ function renderPlan(popup, run, status) {
     return item;
   }));
   els.majorsSection.hidden = status === 'idle' || !majors.length;
-  const progress = run.progress ?? (['prepared', 'starting'].includes(status)
-    ? {current: 0, total: 4 + 3 * (majors.length || 1)} : null);
-  els.progressArea.hidden = !progress || ['idle', 'expired', 'cancelled'].includes(status);
-  if (progress) {
-    els.syncProgress.max = progress.total;
-    els.syncProgress.value = progress.current;
-    els.progressLabel.textContent = progress.current === 0 ? `${progress.total} steps in this sync`
-      : status === 'success' ? `${progress.total} of ${progress.total} steps finished`
-      : status === 'partial' ? `Finished at step ${progress.total} of ${progress.total}`
-      : `${['error', 'signin'].includes(status) ? 'Stopped at step' : 'Step'} ${progress.current} of ${progress.total}`;
-  }
 }
 
 els.website.addEventListener("click", async () => {
@@ -133,7 +122,7 @@ async function render() {
   els.confirmMessage.textContent = confirming ? pendingChange.message : "";
   const status = submitting ? "starting" : preparedAction ? "prepared"
     : confirming ? "confirm" : relevantRun.status || "idle";
-  showStatus(status, status === "running" ? relevantRun.step || popup?.running_message || "Working…"
+  showStatus(status, status === "running" ? "Follow progress on your UCSBPlat profile."
     : status === "prepared" || confirming ? "" : relevantRun.message ?? "");
-  renderPlan(popup, relevantRun, status);
+  renderPlan(popup, status);
 }
