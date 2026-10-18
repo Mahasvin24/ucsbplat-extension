@@ -8,11 +8,11 @@
   </head>
   <body data-state="loading">
     <header class="site-header">
-      <div class="site-brand"><img src="icons/icon128.png" width="40" height="40" alt="" /><span>UCSBPlat</span></div>
-      <span class="header-label">GOLD sync</span>
+      <div class="site-brand"><img src="icons/icon128.png" width="24" height="24" alt="" /><span>UCSBPlat</span></div>
+      <span class="header-label">GOLD</span>
     </header>
     <main>
-      <section class="request-panel" aria-label="GOLD sync request">
+      <section class="request-content" aria-label="GOLD sync request">
         <div class="state-heading">
           <span class="state-icon" aria-hidden="true">
             <svg class="icon-sync" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.5-1L20 9M4 15l2.4 3A7 7 0 0 0 17.9 17" /></svg>
@@ -23,17 +23,15 @@
           <h1 id="stateLabel" class="state-label" aria-live="polite" aria-atomic="true">Checking request…</h1>
         </div>
         <div id="intro" class="intro" hidden>
-          <h2>Your GOLD record.<br />Connected to your profile.</h2>
-          <p>Choose an action on UCSBPlat to sync your schedule and major progress from GOLD.</p>
+          <h1>Sync starts on your profile.</h1>
+          <p>Open UCSBPlat to choose the GOLD data you want to update.</p>
         </div>
         <div id="websiteAction" class="website-action" hidden>
-          <h2 id="websiteActionTitle"></h2>
+          <h1 id="websiteActionTitle"></h1>
           <p id="websiteActionDetail"></p>
         </div>
         <p id="status" class="status" role="status" aria-live="polite" hidden></p>
-        <p id="statusHint" class="status-hint" hidden></p>
         <div id="confirm" class="confirm" hidden>
-          <h2>Replace your primary major?</h2>
           <p id="confirmMessage"></p>
           <div class="confirm-actions">
             <button id="confirmYes" type="button" class="button button-primary">Replace primary major</button>
@@ -45,12 +43,8 @@
           <button id="cancelWebsiteAction" type="button" class="button button-quiet" hidden>Cancel</button>
         </div>
       </section>
-      <button id="website" type="button" class="button button-primary profile-button" hidden>Open ucsbplat.com</button>
+      <button id="website" type="button" class="button button-primary profile-button" hidden>Open ucsbplat.com <span aria-hidden="true">↗</span></button>
     </main>
-    <footer class="page-footer">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 4 8 9 8 9s8-5 8-9V6ZM9 12l2 2 4-4" /></svg>
-      <span>GOLD pages are read only when you confirm.</span>
-    </footer>
     <script src="popup.js" type="module"></script>
   </body>
 </html>

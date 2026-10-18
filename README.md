@@ -152,8 +152,8 @@ presentation states and keep the website's title, description, button, and runni
 | Expired confirmation | Explanation to begin a fresh request on the website |
 | Worker unavailable | Recovery message |
 
-Only the idle view shows website navigation and the general privacy footer. Loaded
-requests show their own information and any confirmation/cancellation controls.
+Only the idle view shows website navigation. Loaded requests show their own heading,
+website-supplied explanation, and any confirmation/cancellation controls in a flat layout.
 
 Finished results appear only for the request this popup is following. Reopening the
 toolbar after completion returns to the profile entry point. Website API errors

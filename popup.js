@@ -1,7 +1,7 @@
 import { UCSBPLAT_ORIGIN } from "./config.js";
 
 const els = Object.fromEntries([
-  "intro", "websiteAction", "websiteActionTitle", "websiteActionDetail", "status", "stateLabel", "statusHint",
+  "intro", "websiteAction", "websiteActionTitle", "websiteActionDetail", "status", "stateLabel",
   "run", "cancelWebsiteAction", "confirm", "confirmMessage", "confirmYes", "confirmNo", "website",
 ].map((id) => [id, document.getElementById(id)]));
 let preparedAction = null;
@@ -12,7 +12,7 @@ let submitting = false;
 const labels = {
   idle: "GOLD sync", prepared: "Ready to sync", starting: "Starting update…",
   running: "Sync in progress", confirm: "Review major change", success: "Update saved",
-  partial: "Partially saved", error: "Update needs attention", signin: "Sign in required",
+  partial: "Some data was saved", error: "Update needs attention", signin: "Sign in required",
   cancelled: "Update cancelled", expired: "Confirmation expired",
 };
 
@@ -30,10 +30,6 @@ function showStatus(status, message = "") {
   els.stateLabel.textContent = labels[status] ?? labels.error;
   els.status.textContent = message;
   els.status.hidden = !message;
-  els.statusHint.textContent = ["success", "partial"].includes(status)
-    ? "Review the saved details on your profile."
-    : status === "signin" ? "Sign in on UCSBPlat, then start a new update from your profile." : "";
-  els.statusHint.hidden = !els.statusHint.textContent;
 }
 
 els.website.addEventListener("click", () => chrome.tabs.create({ url: `${UCSBPLAT_ORIGIN}/profile/` }));

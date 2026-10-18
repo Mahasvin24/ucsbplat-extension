@@ -336,8 +336,6 @@ async function popupScenario(initialState, {respond} = {}) {
       check(p.elements.website.hidden, `${action} ${status} omits website navigation`);
       check(p.elements.status.textContent === (status === 'running' ? copy.running_message : `Server ${status}`),
         `${action} ${status} preserves website copy`);
-      check(p.elements.statusHint.hidden === !['success', 'partial', 'signin'].includes(status),
-        `${action} ${status} shows the appropriate profile guidance`);
     }
   }
   p = await popupScenario({expiredRequestId: requestId, lastRun: {requestId, popup, status: 'expired', message: 'Expired request'}});
