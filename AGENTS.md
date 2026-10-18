@@ -58,7 +58,9 @@ Three settings move together: set `UCSBPLAT_ORIGIN` to `LOCAL_ORIGIN` in `config
 `externally_connectable.matches`. The localhost entries are deliberately not left in a release
 manifest — a published extension asking for plain-http localhost access is a permission it can
 never use and one more thing for a reviewer to query. **Undo all three before packaging.**
-`package.sh` refuses to build while any local-development setting remains.
+`package.sh` refuses to build while any local-development setting remains. Use
+`./package.sh --release` to prepare hosted configuration in a temporary allowlisted copy
+without changing the development checkout.
 
 ## Web Store submission
 

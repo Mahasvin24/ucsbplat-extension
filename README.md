@@ -70,11 +70,13 @@ the browser sends `chrome-extension://<id>` as the Origin, which is what the ser
 content script would send `my.sa.ucsb.edu` and be rejected with 403. The call sets
 `credentials: "include"`; without it every request is a 401.
 
-**The extension id must be listed in `EXTENSION_ID` on the server.** It is on `chrome://extensions`,
-and a 403 names it in the error message. An unpacked id is derived from the folder path, so it
-varies per checkout; a published id is permanent. The server takes a comma-separated list so both
-can be allowed at once — or paste the published item's public key into `manifest.json` as `"key"` to
-make the unpacked build use the published id.
+**The published and current development IDs are already configured.** The website bridge
+uses `cffmlcefmeeeiidkdffgjimpjojiibap` on production and
+`hfooonebbcahpcdcfcanochcgfkioggg` on localhost; the API allowlist includes both. Updating
+the existing store item needs no ID or environment change. If a different unpacked
+checkout gets a different ID, update the localhost bridge mapping and allow that ID through
+the server's comma-separated `EXTENSION_ID`, then restart the website workers. The actual
+ID appears on `chrome://extensions` and in a rejected sync's 403 message.
 
 **Cross-site cookies.** Chrome only attaches a cookie to the extension's request if it is
 `SameSite=None; Secure`. Every 401 is reported the same way — sign in and run it again — because
@@ -191,6 +193,10 @@ controls in isolated Chrome. `CHROME_PATH` can point at an installed Chrome bina
 the actual injected functions: dependent lists, label/value matching, ambiguity rejection,
 checkbox idempotence, and stale versus fresh audit output. It makes no network requests.
 
+`node render-store.cjs` uses the same browser setup to regenerate the store screenshot
+from the current popup with synthetic website confirmation data. It makes no external
+requests and is excluded from release archives.
+
 ### Manual GOLD checks still needed
 
 1. Add a major using the actual labels from both GOLD dropdowns. Verify the popup names it,
@@ -203,6 +209,8 @@ checkbox idempotence, and stale versus fresh audit output. It makes no network r
 5. Reopen the popup mid-run and verify live steps resume. Inspect server-reported partial
    results when an ordinary audit capture fails, and check real cookies/long MV3 runs.
 
-For release verification, use a temporary release copy, restore hosted configuration,
-remove localhost from both manifest lists, and run `./package.sh`. Keep the development
-checkout pointed at localhost. Real GOLD/Chrome behavior still needs an unpacked-browser sync.
+For release verification, run `./package.sh --release`. It builds from an explicit file
+list in a temporary directory, restores hosted configuration there, and removes localhost
+from both manifest lists. The development checkout stays pointed at localhost. Running
+`./package.sh` without the flag still refuses local configuration. Real GOLD/Chrome
+behavior still needs an unpacked-browser sync.

@@ -11,7 +11,7 @@ this file, `manifest.json`, and <https://ucsbplat.com/privacy>.
 
 ## Store listing
 
-**Name:** UCSBPlat Helper
+**Name:** UCSBPlat (matches `manifest.json`)
 
 **Short description** (132 char limit, current: 61)
 
@@ -21,11 +21,11 @@ this file, `manifest.json`, and <https://ucsbplat.com/privacy>.
 
 **Detailed description**
 
-> UCSBPlat Helper keeps your UCSBPlat course record in step with GOLD.
+> UCSBPlat keeps your course record in step with GOLD.
 >
 > UCSBPlat can show your degree progress and suggest courses to take next, but it has no
 > way to read GOLD on its own. This extension is that link. When you ask UCSBPlat to add
-> your selected major, or click "Update my Course Data" on your profile, the extension shows the action
+> or refresh a selected major, or click "Update my Course Data" on your profile, the extension shows the action
 > for confirmation, opens the relevant GOLD pages, reads them using the GOLD session you
 > are already signed in to, and sends the result to your UCSBPlat account.
 >
@@ -96,21 +96,22 @@ hosted scripts. Everything executed ships in the package. The functions passed t
 
 ### Data types collected
 
-Tick, and nothing else:
+Tick:
 
 - **Website content** — the contents of the two GOLD pages (courses, grades, degree
   requirements, class times).
+- **Personally identifiable information** — captured page contents can contain a student's
+  name and other identifiers. They are transmitted to UCSBPlat even though the parser
+  does not extract or retain the GOLD name as a structured field.
 
-Do **not** tick: personally identifiable information, authentication information, health,
-financial and payment, personal communications, location, web history, or user activity.
-None are collected.
+Do **not** tick: authentication information, health, financial and payment, personal
+communications, location, web history, or user activity. The extension does not collect
+these separately. Class meeting rooms are included in website content, not device location.
 
-> Note, in case a reviewer asks: the GOLD pages are page contents and a student's name is
-> rendered on them, which is what "website content" covers and what the privacy policy
-> describes. Nothing pulls it out — the server parses courses and requirements and keeps
-> no name — so no personally identifiable information is collected as such. Authentication
-> is likewise nothing the extension handles: the request carries whatever session cookie
-> the browser already attaches, and the extension neither reads nor stores a cookie.
+Transient transmission is still collection; do not omit the personal-information disclosure
+just because the server discards the HTML. The extension neither reads nor stores session
+cookies or GOLD passwords; the browser attaches the UCSBPlat session cookie to API requests.
+See Google's [privacy-field instructions](https://developer.chrome.com/docs/webstore/cws-dashboard-privacy).
 
 ### Certifications
 
@@ -140,8 +141,8 @@ after the rest is done.
 
 ## Store images
 
-All three required images are in `store/` and `icons/`, and none of them ship inside the
-extension package — they are uploaded through the dashboard.
+All three required images are in `store/` and `icons/`. Icons also ship in the extension;
+the promotional tile and screenshot are uploaded only through the dashboard.
 
 | Dashboard field | File | Notes |
 | --- | --- | --- |
@@ -152,20 +153,39 @@ extension package — they are uploaded through the dashboard.
 The screenshot is a real render of the popup: the extension's own `popup.css` and markup,
 captured in a browser, not a drawing of it. The record shown in it is invented. A listing
 image is public, and a real transcript is the one thing that must never be in one.
+Regenerate it with `node render-store.cjs` (Playwright on `NODE_PATH`, optional `CHROME_PATH`).
+The script intercepts all network requests and supplies synthetic confirmation data.
 
 ## Before uploading
 
-1. `./package.sh` — must print `clean` and roughly 32K. It refuses to build if
-   `sample-data/` (real academic records) is in the archive.
-2. Confirm `manifest.json` has no `http://localhost` host permission and that
-   `config.js` points at `HOSTED_ORIGIN`.
+1. `./package.sh --release` — must print `clean`. It builds a hosted release from an
+   explicit file list without changing the development checkout. Both harnesses, docs,
+   store images, and `sample-data/` are excluded.
+2. Inspect the **archived** `manifest.json` and `config.js`: no localhost permissions or
+   externally connectable matches; active origin must be `HOSTED_ORIGIN`.
 3. **Deploy the website first**, then read <https://ucsbplat.com/privacy> against this
    file. Every disclosure here must be true *of the live site* — a reviewer reads the
-   deployed policy, not the repository. In particular the "no personally identifiable
-   information" answer below depends on the server having stopped parsing the student
-   name, which is a deploy, not a code change.
-4. The published extension gets a permanent ID different from the unpacked one. Add it to
-   `EXTENSION_ID` on the server, or the API will answer 403 — see the README.
+   deployed policy, not the repository. Disclose personal information in the dashboard
+   because full GOLD page contents can include it, even though raw HTML is discarded.
+4. The existing published ID `cffmlcefmeeeiidkdffgjimpjojiibap` and current development ID
+   are already configured in the website bridge and API allowlist. No manual ID setup
+   is needed for an update to this store item. A different unpacked checkout may need
+   its localhost mapping and server allowlist updated — see the README.
+5. Verify both September migrations are applied before the website rollout:
+   `2026_09_gold_audit_selection.sql`, then `2026_09_student_audits.sql`. Pause GOLD writes
+   during the initial migration until all workers run the multi-major website code.
+   Protocol v5 requires the matching website and Redis. This release needs no additional migration.
+6. Load the extracted release package unpacked and complete the real-GOLD checks in
+   `README.md`: add, full update with two majors, secondary refresh, close/retry, and
+   reopen the popup mid-run. Verify the published extension ID and production cookies too.
+7. Upload to the **existing** Web Store item `cffmlcefmeeeiidkdffgjimpjojiibap` so its ID
+   stays stable. Confirm version `1.6` is higher than every previously uploaded package;
+   if it has already been uploaded, increment the manifest version and rebuild.
+8. Replace the old screenshot with the current one, apply both data disclosures above,
+   verify publisher contact email and two-step verification, and provide reviewer test
+   instructions for the signed-in UCSBPlat/GOLD flow. Never share a real student's login
+   or transcript; use an authorized test account or ask review support for the accepted
+   alternative when GOLD access cannot be provided.
 
 ## Website actions (v1.6 / protocol v5)
 
