@@ -163,15 +163,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "GET_POPUP_STATE") {
     (async () => {
       await ensureRecovered();
-      const local = await chrome.storage.local.get(["lastRun", "pendingChange"]);
+      let local = await chrome.storage.local.get(["lastRun", "pendingChange"]);
       const stored = await chrome.storage.session.get(WEBSITE_ACTION_KEY);
       let pending = stored[WEBSITE_ACTION_KEY];
+      let expiredRequestId = null;
       if (pending && Date.now() - pending.requestedAt >= CONFIRM_TTL_MS) {
-        await reportWebsiteStatus(pending.requestId, "cancelled", "This confirmation expired. Start a new update from your profile.");
+        const message = "This confirmation expired. Start a new update from your profile.";
+        await reportWebsiteStatus(pending.requestId, "cancelled", message);
+        expiredRequestId = pending.requestId;
+        await setRun({ requestId: pending.requestId, popup: pending.popup, status: "expired", message, step: "", finishedAt: Date.now() });
         await chrome.storage.session.remove(WEBSITE_ACTION_KEY);
         pending = null;
+        local = await chrome.storage.local.get(["lastRun", "pendingChange"]);
       }
-      sendResponse({ ...local, pendingWebsiteAction: pending });
+      sendResponse({ ...local, pendingWebsiteAction: pending, expiredRequestId });
     })().catch(() => sendResponse({ error: "Could not check this update. Open your UCSBPlat profile to try again." }));
     return true;
   }
@@ -185,7 +190,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     (async () => {
       const stored = await chrome.storage.session.get(WEBSITE_ACTION_KEY);
       const pending = stored[WEBSITE_ACTION_KEY];
-      if (pending?.requestId) await reportWebsiteStatus(pending.requestId, "cancelled", "Update cancelled. Nothing was changed.");
+      if (pending?.requestId) {
+        const message = "Update cancelled. Nothing was changed.";
+        await reportWebsiteStatus(pending.requestId, "cancelled", message);
+        await setRun({ requestId: pending.requestId, popup: pending.popup, status: "cancelled", message, step: "", finishedAt: Date.now() });
+      }
       await chrome.storage.session.remove(WEBSITE_ACTION_KEY);
       sendResponse({ cancelled: true });
     })();

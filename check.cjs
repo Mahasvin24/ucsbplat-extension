@@ -116,20 +116,21 @@ function setup({getStatus = 200, action = 'add_major', postStatus = 200, resultS
 }
 let passed = 0;
 function check(condition, label) { assert.ok(condition, label); passed++; }
-async function popupScenario(initialState) {
+async function popupScenario(initialState, {respond} = {}) {
   let state = initialState;
   const elements = {};
   const messages = [];
   const tabs = [];
   const storageListeners = [];
   const context = vm.createContext({
-    document: {getElementById(id) {
+    document: {body: {dataset: {}}, getElementById(id) {
       return elements[id] ??= {hidden: true, disabled: false, textContent: "", events: {},
         classList: {toggle() {}}, addEventListener(type, callback) { this.events[type] = callback; }};
     }},
     chrome: {
       runtime: {sendMessage: async (message) => {
         messages.push(message);
+        if (respond) return respond(message, state);
         return message.type === 'GET_POPUP_STATE' ? state : {started: true};
       }},
       storage: {onChanged: {addListener: (fn) => storageListeners.push(fn)}},
@@ -139,7 +140,7 @@ async function popupScenario(initialState) {
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, 'popup.js'), 'utf8').replace(/^import .*;\n/m, ''), context);
   await new Promise((resolve) => setImmediate(resolve));
-  return {elements, messages, tabs, async update(next) {
+  return {elements, messages, tabs, body: context.document.body, async update(next) {
     state = next;
     storageListeners[0]({lastRun: {}}, 'local');
     await new Promise((resolve) => setImmediate(resolve));
@@ -201,6 +202,8 @@ async function popupScenario(initialState) {
   s = setup(); await vm.runInContext(`prepareWebsiteAction('add_major', '${requestId}')`, s.context);
   await new Promise((resolve) => s.listeners.internal({type: 'CANCEL_WEBSITE_ACTION'}, {}, resolve));
   check(!s.storage.session.pendingWebsiteAction && s.calls.reports[0].status === 'cancelled', 'prepared cancellation reaches website');
+  check(s.storage.local.lastRun.status === 'cancelled' && s.storage.local.lastRun.requestId === requestId,
+    'prepared cancellation retains feedback for the open popup');
   s = setup();
   reply = await new Promise((resolve) => s.listeners.internal({type: 'START_SYNC'}, {}, resolve));
   check(!reply.started && s.calls.tabs === 0, 'raw popup cannot fall back to standalone sync');
@@ -210,8 +213,10 @@ async function popupScenario(initialState) {
   s.storage.session.pendingWebsiteAction.requestedAt = 0;
   reply = await new Promise((resolve) => s.listeners.internal({type: 'START_SYNC', requestId}, {}, resolve));
   check(!reply.started && s.calls.tabs === 0, 'expired confirmation never starts fallback sync');
-  await new Promise((resolve) => s.listeners.internal({type: 'GET_POPUP_STATE'}, {}, resolve));
+  reply = await new Promise((resolve) => s.listeners.internal({type: 'GET_POPUP_STATE'}, {}, resolve));
   check(!s.storage.session.pendingWebsiteAction && s.calls.reports.some((r) => r.status === 'cancelled'), 'expired request is cleared and reported');
+  check(reply.expiredRequestId === requestId && reply.lastRun.status === 'expired' && reply.lastRun.popup,
+    'expired confirmation has a visible result instead of silently reverting to idle');
   s = setup(); delete s.job.popup;
   await assert.rejects(vm.runInContext(`prepareWebsiteAction('add_major', '${requestId}')`, s.context));
   check(s.calls.tabs === 0, 'website must supply popup presentation');
@@ -314,5 +319,41 @@ async function popupScenario(initialState) {
   check(!p.elements.websiteAction.hidden && p.elements.status.textContent === popup.running_message, 'reopening during a run resumes website action');
   await p.update({lastRun: {requestId, popup, status: 'error', message: 'The GOLD tab was closed.'}});
   check(p.elements.run.hidden && p.elements.status.textContent.includes('GOLD tab was closed'), 'closed tab presents failure and website link without standalone retry');
+
+  for (const action of ['add_major', 'sync_all', 'refresh_major']) {
+    const copy = setup({action}).job.popup;
+    p = await popupScenario({pendingWebsiteAction: {requestId, type: action, popup: copy}});
+    check(p.body.dataset.state === 'prepared' && !p.elements.run.disabled && !p.elements.cancelWebsiteAction.hidden,
+      `${action} offers explicit confirmation and cancellation`);
+    for (const status of ['running', 'success', 'partial', 'error', 'signin', 'cancelled', 'expired']) {
+      await p.update({lastRun: {requestId, popup: copy, status, message: `Server ${status}`}});
+      check(p.body.dataset.state === status && p.elements.run.hidden && p.elements.confirm.hidden,
+        `${action} ${status} has a distinct state without an unintended confirmation`);
+      check(p.elements.status.textContent === (status === 'running' ? copy.running_message : `Server ${status}`),
+        `${action} ${status} preserves website copy`);
+      check(p.elements.statusHint.hidden === !['success', 'partial', 'signin'].includes(status),
+        `${action} ${status} shows the appropriate profile guidance`);
+    }
+  }
+  p = await popupScenario({expiredRequestId: requestId, lastRun: {requestId, popup, status: 'expired', message: 'Expired request'}});
+  check(p.body.dataset.state === 'expired' && p.elements.run.hidden && p.elements.status.textContent === 'Expired request',
+    'opening an expired prepared action displays its explanation');
+  p = await popupScenario({error: 'Could not check this update.'});
+  check(p.body.dataset.state === 'error' && p.elements.status.textContent === 'Could not check this update.',
+    'state retrieval failure has a visible recovery state');
+  p = await popupScenario({}, {respond: async () => { throw new Error('Worker unavailable'); }});
+  check(p.body.dataset.state === 'error' && p.elements.status.textContent.includes("Couldn't reach the extension"),
+    'unavailable worker has a visible recovery state');
+  let releaseStart;
+  p = await popupScenario({pendingWebsiteAction: {requestId, popup}}, {respond: (message, state) =>
+    message.type === 'GET_POPUP_STATE' ? state : new Promise((resolve) => { releaseStart = resolve; })});
+  const click = p.elements.run.events.click();
+  await p.elements.run.events.click();
+  check(p.body.dataset.state === 'starting' && p.elements.run.disabled && p.elements.cancelWebsiteAction.disabled
+    && p.messages.filter((m) => m.type === 'START_SYNC').length === 1, 'starting feedback blocks duplicate confirmation and cancellation');
+  releaseStart({started: false, message: 'Request expired. Start again from your profile.'});
+  await click;
+  check(p.body.dataset.state === 'error' && p.elements.status.textContent.includes('Request expired'),
+    'start rejection retains actionable feedback');
   console.log(`${passed} extension checks passed`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });

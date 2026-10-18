@@ -133,6 +133,31 @@ gitignored because it contains real academic records.
 
 ## Verification
 
+### Popup state coverage
+
+All three website actions (`add_major`, `sync_all`, `refresh_major`) use the same
+presentation states and keep the website's title, description, button, and running copy.
+
+| State | Popup behavior |
+| --- | --- |
+| Toolbar / idle | Link to the profile; no past results or standalone sync |
+| Prepared | Website action with confirm and cancel controls |
+| Starting | Immediate feedback; confirm and cancel disabled while dispatching |
+| Running | Website running message; no duplicate start control |
+| Major replacement | Website explanation with explicit replace/cancel controls |
+| Success | Saved message and link to profile details |
+| Partial save | Distinct warning state and link to profile details |
+| Error / sign-in required | Actionable message and profile/sign-in link |
+| Cancelled | Cancellation feedback for the current popup |
+| Expired confirmation | Explanation and profile link to begin a fresh request |
+| Worker unavailable | Recovery message and profile link |
+
+Finished results appear only for the request this popup is following. Reopening the
+toolbar after completion returns to the profile entry point. Website API errors
+(expired request, invalid major, parse/save failures, unavailable status, and rejected
+origin) use the error presentation and preserve the returned explanation. Warnings and
+counts stay on the website. Local expiry is reported to the website as cancellation.
+
 `node check.cjs` drives the real service worker with synthetic Chrome and HTTP stubs. It
 checks website-only initiation, server-supplied popup copy, selected-major restoration,
 partial/failure results, closure during each capture phase, stuck-injection interruption,

@@ -22,9 +22,15 @@ h1 {
   color: var(--muted);
 }
 
-.status.error {
+.state-label { font-weight: 600; color: #003660; }
+.status-hint { color: var(--muted); }
+body[data-state="error"] .status,
+body[data-state="signin"] .status {
   color: #c0392b;
 }
+body[data-state="success"] .state-label { color: #276749; }
+body[data-state="partial"] .state-label,
+body[data-state="confirm"] .state-label { color: #805700; }
 
 .website-action {
   margin: 0 0 12px;
