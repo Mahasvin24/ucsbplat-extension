@@ -107,6 +107,6 @@ async function render() {
   els.confirmMessage.textContent = confirming ? pendingChange.message : "";
   const status = submitting ? "starting" : preparedAction ? "prepared"
     : confirming ? "confirm" : relevantRun.status || "idle";
-  showStatus(status, status === "running" ? popup?.running_message ?? "Working…"
+  showStatus(status, status === "running" ? relevantRun.step || popup?.running_message || "Working…"
     : status === "prepared" || confirming ? "" : relevantRun.message ?? "");
 }

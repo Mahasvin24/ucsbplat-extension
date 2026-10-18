@@ -7,16 +7,18 @@ of the courses a student has taken and is currently taking.
 Every run starts with an action on the UCSBPlat website and confirmation in the extension.
 Opening the toolbar popup directly links to your profile; it cannot start a standalone sync.
 
-1. Checks the student is signed in to ucsbplat.com (`GET /api/extension/session`). A 401 stops the
-   run before GOLD is ever opened. If the student has synced before, the response also supplies
-   the two saved Major Progress Check selections.
+1. Resolves the website request and checks sign-in (`GET /api/extension/session`). A 401 stops
+   the run before GOLD opens. The request identifies every major to refresh and both of its
+   GOLD dropdown selections. An initial add supplies the two labels entered on the website.
 2. Opens `StudentSchedule.aspx` in a background tab and captures it, noting the selected quarter.
-3. Goes to `AcademicProgress.aspx`. For a returning student it selects the saved Major Area first,
-   waits for GOLD to repopulate the page, then selects the saved audit. It records both selected
+3. Goes to `AcademicProgress.aspx` for each requested major. It selects Major Area first,
+   waits for GOLD to repopulate the dependent dropdown, then selects the audit. It verifies and records both selected
    values and labels, ticks "use in-progress courses", clicks **Run This Progress Check**, waits for
-   the audit to render, clicks **Expand All**, and captures the page.
-4. `POST`s both pages to `https://ucsbplat.com/api/extension/gold-sync` as
-   `{ schedule_page, major_progress_check, audit_selection }`, then closes the tab.
+   fresh audit to render, clicks **Expand All**, and captures the page. Old results do not count
+   as completion; full navigation and AJAX grid replacement/content updates are supported.
+4. Posts the schedule once and the requested audit captures to `/api/extension/gold-sync`, then
+   closes the tab. `sync_all` sends `{schedule_page, major_progress_checks: [{audit_id,
+   major_progress_check, audit_selection}], action, request_id}`. Add/refresh sends one audit.
 
 Either page alone is still worth sending, so a failure on one is reported as a warning and the other
 is sent anyway. The captured HTML is the student's full transcript: it is never written to extension
@@ -24,19 +26,24 @@ storage, never logged, and is dropped as soon as the request finishes.
 
 The website prepares `add_major`, `sync_all`, or `refresh_major` using a short-lived,
 account-scoped server request ID. The extension resolves that request from the website,
-shows a confirmation popup, and starts only after the student confirms. Add-major reads
-the current GOLD choice, captures its audit and the schedule, and can save the first major
-or another major. Refresh-major restores the saved selectors for the requested major;
-normal full updates restore the primary major's selectors.
+shows a confirmation popup, and starts only after the student confirms. Add-major requires
+both dropdown labels from the website and resolves them to exact GOLD option values; it
+never assumes GOLD's default choice. Refresh-major uses the requested saved pair. Full
+updates capture the schedule once and refresh every saved major in primary-first order.
+Failed captures keep that major's previous requirements and produce a server-owned partial
+result. Wrong audit identities roll back the entire batch. Re-entering a legacy major with
+missing selections repairs the existing row rather than adding a duplicate.
 
 The website decides the saved result. A successful response includes `status: success`
 or `partial`, the database timestamp, stored summary/counts, and warnings. The website displays the detailed result. The popup shows only the website's action text,
-a simple running message, and the final server message. It has no sync history, counts,
+live progress (current courses, selecting a major, including in-progress courses, running
+the named major's check, and saving), and the final server message. It has no sync history, counts,
 warnings list, or reminder settings. The extension reports running/failure/cancellation to the
 same account-scoped request; it cannot declare a save successful itself. Prepared actions
 can be cancelled in the popup. No captured HTML is written to extension storage.
 
-Protocol v4 requires extension v1.3 and the corresponding website changes. A website message
+Protocol v5 requires extension v1.4 and the corresponding website changes. No new database
+migration is needed; the existing selector columns and per-major audit tables are reused. A website message
 cannot start GOLD automation or read extension storage. Status receipts contain no captured
 HTML, expire on the server after 15 minutes, and are erased with course-data deletion.
 
@@ -97,8 +104,9 @@ To point it at a local UCSBPlat, swap `UCSBPLAT_ORIGIN` to `LOCAL_ORIGIN` in `co
 
 ## Using it
 
-During onboarding, run the progress check for your current major in GOLD, then choose **Add this
-major** on UCSBPlat and confirm in the extension popup. For later updates, choose **Update my
+During onboarding, choose both dropdowns in GOLD and copy their labels into the two fields
+on UCSBPlat. Choose **Add this major** and confirm in the popup; the extension runs the check
+with in-progress courses included. For later updates, choose **Update my
 Course Data** or **Refresh this major** on the website and confirm the requested action.
 Keep the automation tab open until the update finishes. Use your profile for saved details.
 
@@ -143,7 +151,7 @@ presentation states and keep the website's title, description, button, and runni
 | Toolbar / idle | Open ucsbplat.com button to the profile; no past results or standalone sync |
 | Prepared | Website action with confirm and cancel controls |
 | Starting | Immediate feedback; confirm and cancel disabled while dispatching |
-| Running | Website running message; no duplicate start control |
+| Running | Live worker step with the current major's name; no duplicate start control |
 | Major replacement | Website explanation with explicit replace/cancel controls |
 | Success | Saved message |
 | Partial save | Distinct warning state with the website's explanation |
@@ -166,6 +174,23 @@ checks website-only initiation, server-supplied popup copy, selected-major resto
 partial/failure results, closure during each capture phase, stuck-injection interruption,
 worker restart, network timeouts, retry, confirmation races, and that captured HTML never
 reaches storage. `node --check background.js && node --check popup.js` checks syntax.
+
+`node check-browser.cjs` uses Playwright (via `NODE_PATH` if needed) against synthetic GOLD
+controls in isolated Chrome. `CHROME_PATH` can point at an installed Chrome binary. It checks
+the actual injected functions: dependent lists, label/value matching, ambiguity rejection,
+checkbox idempotence, and stale versus fresh audit output. It makes no network requests.
+
+### Manual GOLD checks still needed
+
+1. Add a major using the actual labels from both GOLD dropdowns. Verify the popup names it,
+   the first selection repopulates the second, and the checkbox is checked before the run.
+2. Save a second major, then choose **Sync with GOLD**. Confirm current courses are checked
+   once, each major's name appears as it runs, and both progress pages update afterward.
+3. Use **Refresh this major** on the secondary major. Confirm the primary stays primary.
+4. Close GOLD during the second audit: the request should fail without submitting earlier
+   captures. Retry from the website. Also verify signed-out GOLD and missing-option errors.
+5. Reopen the popup mid-run and verify live steps resume. Inspect server-reported partial
+   results when an ordinary audit capture fails, and check real cookies/long MV3 runs.
 
 For release verification, use a temporary release copy, restore hosted configuration,
 remove localhost from both manifest lists, and run `./package.sh`. Keep the development

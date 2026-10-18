@@ -24,7 +24,7 @@ const SYNC_ENDPOINT = `${UCSBPLAT_ORIGIN}/api/extension/gold-sync`;
 const PROGRESS_ENDPOINT = `${UCSBPLAT_ORIGIN}/api/extension/session`;
 const UNREACHABLE = `Couldn't reach ${UCSBPLAT_HOST}. Check your connection and try again.`;
 const WEBSITE_ORIGINS = new Set([HOSTED_ORIGIN, LOCAL_ORIGIN]);
-const EXTERNAL_PROTOCOL_VERSION = 4;
+const EXTERNAL_PROTOCOL_VERSION = 5;
 const ACTION_SYNC_ALL = "sync_all";
 const ACTION_ADD_MAJOR = "add_major";
 const ACTION_REFRESH_MAJOR = "refresh_major";
@@ -302,14 +302,14 @@ async function runSync(action, requestId) {
     }
     await setRun({ popup: job.popup });
     const profile = await requireSignedIn();
-    // Adding a major uses the student's current GOLD choice. Restoring the saved
-    // primary selection here would silently re-add the wrong audit.
-    const savedSelection = action === ACTION_ADD_MAJOR
-      ? null : job?.audit_selection ?? profile?.student?.audit_selection ?? null;
+    // The request owns both dropdown selections, including the first major import.
+    const savedSelection = job.audit_selection ?? (action === ACTION_ADD_MAJOR ? null : profile?.student?.audit_selection);
+    if (action === ACTION_ADD_MAJOR && !savedSelection) {
+      throw new Error('Enter both GOLD fields on your UCSBPlat profile before adding a major.');
+    }
 
     await setRun({ step: "Opening GOLD…" });
-    const firstUrl = action === ACTION_ADD_MAJOR ? GOLD_AUDIT_URL : GOLD_SCHEDULE_URL;
-    const tab = await chrome.tabs.create({ url: firstUrl, active: false });
+    const tab = await chrome.tabs.create({ url: GOLD_SCHEDULE_URL, active: false });
     tabId = tab.id;
     automationTabId = tabId;
     await chrome.storage.session.set({ automationTabId: tabId });
@@ -317,21 +317,37 @@ async function runSync(action, requestId) {
     await assertOnGold(tabId);
 
     const warnings = [];
-    const scheduleFirst = action !== ACTION_ADD_MAJOR;
-    let schedule = { html: null, quarter: null };
-    if (scheduleFirst) schedule = await captureSchedule(tabId, warnings);
+    if (action === ACTION_SYNC_ALL && Array.isArray(job.audits)) {
+      if (!job.audits.length || job.audits.some((audit) => !audit.audit_selection)) {
+        throw new Error('UCSBPlat did not provide the saved major selections. Start a new update.');
+      }
+      const schedule = await captureSchedule(tabId, warnings);
+      const captures = [];
+      for (const [index, target] of job.audits.entries()) {
+        await setRun({ step: `Preparing major ${index + 1} of ${job.audits.length}: ${target.label}…` });
+        const audit = await captureAudit(tabId, warnings, target.audit_selection, true);
+        captures.push({audit_id: target.audit_id, major_progress_check: audit.html ?? '',
+          ...(audit.selection ? {audit_selection: audit.selection} : {})});
+      }
+      if (!schedule.html && !captures.some((capture) => capture.major_progress_check)) {
+        throw new Error("Couldn't capture any GOLD pages. Your saved data was kept.");
+      }
+      throwIfTabClosed();
+      await setRun({step: 'Saving your schedule and major progress to UCSBPlat…'});
+      throwIfTabClosed();
+      await submit({schedule_page: schedule.html ?? '', major_progress_checks: captures, action, request_id: requestId},
+        {warnings, action, requestId});
+      return;
+    }
+    const schedule = await captureSchedule(tabId, warnings);
     const audit = await captureAudit(
       tabId,
       warnings,
       savedSelection,
-      scheduleFirst,
+      true,
     );
-    // Onboarding starts on the audit so GOLD keeps the student's chosen major.
-    // After trying it, visit My Schedule as well: the audit has course names
-    // but not the units, instructors, rooms, times, or sections shown on Home.
-    if (!scheduleFirst) schedule = await captureSchedule(tabId, warnings, true);
     if (action !== ACTION_SYNC_ALL && !audit.html) {
-      throw new Error("Couldn't capture that major's progress check. Your saved majors were not changed.");
+      throw new Error(audit.error || "Couldn't capture that major's progress check. Your saved majors were not changed.");
     }
     if (!schedule.html && !audit.html) {
       throw new Error("Couldn't capture either GOLD page. Try again in a minute.");
@@ -370,7 +386,7 @@ async function captureSchedule(tabId, warnings, navigateToSchedule = false) {
       await setRun({ step: "Opening your schedule…" });
       await navigate(tabId, GOLD_SCHEDULE_URL);
     }
-    await setRun({ step: "Capturing your schedule…" });
+    await setRun({ step: "Checking your current courses…" });
     // The Dean's Letter may still be covering the schedule on a first visit.
     // Dismissing it is harmless when the audit already cleared it.
     await dismissGate(tabId);
@@ -392,45 +408,48 @@ async function captureAudit(tabId, warnings, savedSelection, navigateToAudit = t
       await navigate(tabId, GOLD_AUDIT_URL);
     }
 
-    await setRun({ step: "Preparing the progress check…" });
+    await setRun({ step: "Preparing the major progress check…" });
     await dismissGate(tabId);
     if (savedSelection) await restoreAuditSelection(tabId, savedSelection);
     const selection = await readAuditSelection(tabId);
+    if (savedSelection) assertRequestedSelection(selection, savedSelection);
+    const majorName = selection.audit.label;
+    await setRun({step: `Including in-progress courses for ${majorName}…`});
     const checkbox = await inject(tabId, ensureInProgressChecked);
-    if (!checkbox.found) {
-      throw new Error("the in-progress courses checkbox is missing");
+    if (!checkbox.found || !checkbox.checked) {
+      throw new Error("the in-progress courses checkbox could not be checked");
     }
+    await waitForSelection(tabId);
+    assertRequestedSelection(await readAuditSelection(tabId), selection);
 
-    await setRun({ step: "Running the progress check…" });
+    await setRun({ step: `Running the major progress check for ${majorName}…` });
     const token = newToken();
-    await inject(tabId, markDocument, [token]);
+    await inject(tabId, markDocument, [token, true]);
     const runButton = await inject(tabId, clickRunAudit);
     if (!runButton.found) {
-      throw new Error("the “Run This Progress Check” button is missing");
+      throw new Error('GOLD could not start the progress check with in-progress courses included.');
     }
-    await waitForDocument(tabId, token, "the progress check didn't finish in time", 90_000);
+    await waitForResults(tabId, token);
 
-    await setRun({ step: "Waiting for results…" });
-    await waitForResults(tabId);
-
-    await setRun({ step: "Expanding all requirements…" });
+    await setRun({ step: `Reading requirements for ${majorName}…` });
     await inject(tabId, clickExpandAll);
     await waitForDomSettle(tabId);
 
-    await setRun({ step: "Capturing the progress check…" });
+    assertRequestedSelection(await readAuditSelection(tabId), selection);
+    await setRun({ step: `Collecting the progress check for ${majorName}…` });
     return { html: await inject(tabId, capturePage), selection };
   } catch (error) {
     if (error instanceof AutomationTabClosedError) throw error;
     throwIfTabClosed();
-    warnings.push(`Couldn't run your major progress check (${reason(error)}).`);
-    return { html: null, selection: null };
+    warnings.push(`Couldn't run ${savedSelection?.audit?.label || 'your major'} progress check (${reason(error)}).`);
+    return { html: null, selection: null, error: reason(error) };
   }
 }
 
 async function restoreAuditSelection(tabId, selection) {
-  await setRun({ step: "Selecting your saved major area…" });
+  await setRun({ step: `Selecting major area: ${selection.major_area?.label || selection.major_area?.value}…` });
   await chooseAuditSelection(tabId, "major_area", selection.major_area);
-  await setRun({ step: "Selecting your saved major…" });
+  await setRun({ step: `Selecting progress check: ${selection.audit?.label || selection.audit?.value}…` });
   await chooseAuditSelection(tabId, "audit", selection.audit);
 }
 
@@ -438,15 +457,45 @@ async function chooseAuditSelection(tabId, kind, option) {
   if (!option?.value && !option?.label) {
     throw new Error("UCSBPlat's saved major selection is incomplete");
   }
-  const token = newToken();
-  await inject(tabId, markDocument, [token]);
+  await waitForSelection(tabId, kind === 'audit');
   const result = await inject(tabId, chooseAuditOption, [kind, option]);
   if (!result.found) throw new Error("GOLD's major selection list is missing");
   if (!result.matched) throw new Error("your saved major is no longer available in GOLD");
   if (result.changed) {
-    await waitForDocument(tabId, token, "GOLD didn't finish changing the major selection.");
+    await waitForSelection(tabId);
     await dismissGate(tabId);
   }
+}
+
+function assertRequestedSelection(actual, expected) {
+  const normalize = (label) => label?.replace(/\s+/g, ' ').trim().toLowerCase();
+  for (const key of ['major_area', 'audit']) {
+    if (expected[key]?.value ? actual[key].value !== expected[key].value
+      : normalize(actual[key].label) !== normalize(expected[key]?.label)) {
+      throw new Error('GOLD did not select the requested major area and progress check. Your saved progress was kept.');
+    }
+  }
+}
+
+async function waitForSelection(tabId, requireAudit = true) {
+  const deadline = Date.now() + 30_000;
+  let previous = null;
+  let stable = 0;
+  while (Date.now() < deadline) {
+    try {
+      const state = await inject(tabId, auditSelectionState);
+      const ready = state.ready && !state.majorArea.disabled && (!requireAudit || (state.audit.found !== false && !state.audit.disabled));
+      if (ready && state.signature === previous) stable++;
+      else stable = 0;
+      previous = ready ? state.signature : null;
+      if (stable >= 2) return;
+    } catch (error) {
+      if (error instanceof AutomationTabClosedError) throw error;
+      stable = 0;
+    }
+    await sleep(300);
+  }
+  throw new Error("GOLD's major selection lists did not finish loading.");
 }
 
 async function readAuditSelection(tabId) {
@@ -630,15 +679,20 @@ async function waitForDocument(tabId, token, timeoutMessage, timeoutMs = 60_000)
   throw new Error(timeoutMessage);
 }
 
-async function waitForResults(tabId) {
+async function waitForResults(tabId, token) {
   const deadline = Date.now() + 90_000;
   while (Date.now() < deadline) {
-    const state = await inject(tabId, auditReadyState);
+    let state;
+    try { state = await inject(tabId, auditReadyState, [token]); } catch (error) {
+      if (error instanceof AutomationTabClosedError) throw error;
+      await sleep(300);
+      continue;
+    }
     if (state.gated) {
       await dismissGate(tabId);
       continue;
     }
-    if (state.hasResults && !state.running) return;
+    if (state.hasResults && state.freshResults && !state.running) return;
     await sleep(500);
   }
   throw new Error("the results never appeared");
@@ -676,8 +730,9 @@ async function inject(tabId, func, args = []) {
 }
 
 async function setRun(patch) {
-  if (activeRequestId && ["running", "error", "signin", "cancelled"].includes(patch.status)) {
-    const job = await reportWebsiteStatus(activeRequestId, patch.status === "signin" ? "error" : patch.status,
+  if (activeRequestId && (["running", "error", "signin", "cancelled"].includes(patch.status)
+      || (!patch.status && patch.step))) {
+    const job = await reportWebsiteStatus(activeRequestId, patch.status === "signin" ? "error" : patch.status || 'running',
       patch.message || patch.step || "Working in GOLD…");
     if (["success", "partial"].includes(job?.status)) {
       patch = { ...patch, status: job.status, message: job.message, step: "", finishedAt: Date.now() };

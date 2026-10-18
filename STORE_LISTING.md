@@ -167,13 +167,15 @@ image is public, and a real transcript is the one thing that must never be in on
 4. The published extension gets a permanent ID different from the unpacked one. Add it to
    `EXTENSION_ID` on the server, or the API will answer 403 — see the README.
 
-## Website actions (v1.3 / protocol v4)
+## Website actions (v1.4 / protocol v5)
 
 Website-initiated add-major, full-update, and selected-major-refresh actions use an
 account-scoped server request and require confirmation in the extension popup. The server
-supplies the popup confirmation and running copy and returns the saved result. The website
+supplies popup confirmation and fallback copy and returns the saved result. Live steps name
+the major being checked. A full update visits every saved major using both stored GOLD
+selectors; adding a major explicitly collects both dropdown labels. The website
 shows detailed results, failure, and cancellation. The toolbar popup cannot start a sync
 without a valid website request, and closing the GOLD tab ends capture with a retryable error. These
 actions collect the same two GOLD pages and academic fields described above, add no
 permissions, and never store captured HTML. Deploy the updated privacy policy before
-submitting this release. `check.cjs` is a development harness and is excluded by `package.sh`.
+submitting this release. Both development harnesses (`check.cjs`, `check-browser.cjs`) are excluded by `package.sh`.

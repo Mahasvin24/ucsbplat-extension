@@ -102,15 +102,22 @@ logs are behind the "service worker" link there.
 - Do not leave `console.log` in a shipped build; the diagnostics from one debugging round
   were committed by accident and had to be stripped before submission.
 
-## Website request protocol (v4)
+## Website request protocol (v5)
 
 A prepared action carries a server-issued request ID. Resolve its action/selectors from the
 website and require popup confirmation. There is no standalone sync fallback. The server
-supplies the popup title, detail, confirm label, and running message; detailed results live
+supplies the popup title, detail, confirm label, and fallback running message; the popup
+shows live worker steps, including the current major's name. Detailed results live
 on the website. A raw toolbar opening links to the profile. Profile visits do not trigger
 reminders. Closing the automation tab must abort even a pending injection, fail the website
 request, and release the worker without submitting a partial capture. The website alone declares saved success/partial
 and supplies freshness; do not turn every HTTP 200 into "Up to date". Report local failures
 and cancellation to that request without storing captured HTML. Refresh-major restores the
-requested audit's selectors, while add-major keeps the current GOLD choice. Release v1.3
-requires the matching protocol-v4 website. Keep `check.cjs` out of release archives.
+requested audit's selectors. Add-major requires both labels entered on the website, resolves
+them to actual GOLD options, and saves both values and labels. Full sync captures current
+courses once and visits every server-requested saved audit. Always select the first dropdown,
+wait for the dependent list, select the second, verify the pair, check in-progress, and wait
+for fresh results (not an old grid). Value mismatches and ambiguous labels must fail.
+Release v1.4 requires the matching protocol-v5 website; it reuses existing DB columns/tables.
+Keep both `check.cjs` and `check-browser.cjs` out of release archives. The browser harness uses
+synthetic controls only; see README for verification and remaining real-GOLD checks.

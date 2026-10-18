@@ -1,8 +1,20 @@
 // Functions in this file are serialized and injected into GOLD pages by
 // chrome.scripting.executeScript, so each one must be fully self-contained.
 
-export function markDocument(token) {
+export function markDocument(token, watchAudit = false) {
   document.documentElement.dataset.ucsbplatRun = token;
+  if (watchAudit) {
+    const grid = document.querySelector('#pageContent_pageContent_DA_GridPlaceHolderRadGrid');
+    if (grid) {
+      grid.dataset.ucsbplatAuditRun = token;
+      // GOLD can update the existing grid through AJAX rather than replace the page.
+      const observer = new MutationObserver(() => {
+        delete grid.dataset.ucsbplatAuditRun;
+        observer.disconnect();
+      });
+      observer.observe(grid, {childList: true, characterData: true, subtree: true});
+    }
+  }
 }
 
 export function documentState(token) {
@@ -29,7 +41,7 @@ export function dismissWelcomeLetter() {
 
 export function ensureInProgressChecked() {
   const checkbox = document.querySelector("#pageContent_DegreeAuditWipCheckBox");
-  if (!checkbox) return { found: false };
+  if (!checkbox || checkbox.disabled) return { found: false };
   if (!checkbox.checked) checkbox.click();
   return { found: true, checked: checkbox.checked };
 }
@@ -42,6 +54,7 @@ export function auditSelectionState() {
       found: !!select,
       value: option?.value?.trim() || null,
       label: option?.textContent?.trim() || null,
+      disabled: !!select?.disabled || !!option?.disabled,
     };
   }
 
@@ -51,22 +64,28 @@ export function auditSelectionState() {
     found: majorArea.found && audit.found,
     majorArea,
     audit,
+    ready: document.readyState === 'complete' && majorArea.found
+      && !Array.from(document.querySelectorAll('.raDiv, .RadAjaxLoadingPanel, [aria-busy="true"]'))
+        .some((element) => element.getClientRects().length > 0),
+    signature: Array.from(document.querySelectorAll('#pageContent_availableMajorsList, #pageContent_availableAuditsList'))
+      .map((select) => `${select.value}:${Array.from(select.options).map((o) => `${o.value}:${o.textContent}`).join('|')}`).join(';'),
   };
 }
 
 export function chooseAuditOption(kind, expected) {
+  if (!['major_area', 'audit'].includes(kind)) return {found: false, matched: false, changed: false};
   const selector = kind === "major_area"
     ? "#pageContent_availableMajorsList"
     : "#pageContent_availableAuditsList";
   const select = document.querySelector(selector);
-  if (!select) return { found: false, matched: false, changed: false };
+  if (!select || select.disabled) return { found: false, matched: false, changed: false };
 
   const options = Array.from(select.options);
-  const normalizedLabel = expected?.label?.trim().toLocaleLowerCase() || null;
-  const option = options.find((candidate) => candidate.value === expected?.value)
-    ?? options.find((candidate) => (
-      normalizedLabel && candidate.textContent.trim().toLocaleLowerCase() === normalizedLabel
-    ));
+  const normalize = (label) => label?.replace(/\s+/g, ' ').trim().toLowerCase();
+  const matches = options.filter((candidate) => !candidate.disabled && candidate.value.trim()
+    && (expected?.value ? candidate.value === expected.value
+      : expected?.label && normalize(candidate.textContent) === normalize(expected.label)));
+  const option = matches.length === 1 ? matches[0] : null;
   if (!option) return { found: true, matched: false, changed: false };
   if (select.value === option.value) {
     return { found: true, matched: true, changed: false };
@@ -79,16 +98,19 @@ export function chooseAuditOption(kind, expected) {
 
 export function clickRunAudit() {
   const button = document.querySelector("#pageContent_runAuditBtn");
-  if (!button) return { found: false };
+  const checkbox = document.querySelector('#pageContent_DegreeAuditWipCheckBox');
+  if (!button || button.disabled || !checkbox?.checked || checkbox.disabled) return { found: false };
   button.click();
   return { found: true };
 }
 
-export function auditReadyState() {
+export function auditReadyState(token) {
   const spinner = document.querySelector("#pageContent_processingAuditPanel");
   const gate = document.querySelector("#pageContent_btnDeanLetterConfirm");
+  const grid = document.querySelector("#pageContent_pageContent_DA_GridPlaceHolderRadGrid");
   return {
-    hasResults: !!document.querySelector("#pageContent_pageContent_DA_GridPlaceHolderRadGrid"),
+    hasResults: !!grid,
+    freshResults: !!grid && grid.dataset.ucsbplatAuditRun !== token,
     running: !!spinner && spinner.offsetParent !== null,
     gated: !!gate && gate.offsetParent !== null,
   };
@@ -111,6 +133,7 @@ export function domSize() {
 export function capturePage() {
   delete document.documentElement.dataset.ucsbplatRun;
   const clone = document.documentElement.cloneNode(true);
+  for (const node of clone.querySelectorAll('[data-ucsbplat-audit-run]')) delete node.dataset.ucsbplatAuditRun;
   for (const node of clone.querySelectorAll("style, script, noscript, svg")) node.remove();
   return clone.outerHTML;
 }

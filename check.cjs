@@ -9,27 +9,30 @@ const requestId = '11111111-1111-4111-8111-111111111111';
 
 function setup({getStatus = 200, action = 'add_major', postStatus = 200, resultStatus = 'success',
   auditFails = false, closeAt = null, missingTab = false, hangAt = null, hangChromeAt = null,
-  closeDuringPost = false, committedThenLost = false, initialLocal = {}} = {}) {
+  closeDuringPost = false, committedThenLost = false, initialLocal = {}, audits = null,
+  wrongSelection = false, unchecked = false, failAuditValue = null, staleResults = 0, closeAuditValue = null} = {}) {
   const storage = {local: {...initialLocal}, session: {}};
   let tabExists = !missingTab;
   let shouldClose = closeAt;
   let shouldHang = hangAt;
   const listeners = {updated: []};
-  const calls = {popup: 0, tabs: 0, posts: [], selections: [], reports: []};
+  const calls = {popup: 0, tabs: 0, posts: [], selections: [], reports: [], injections: [], runs: []};
   const job = {request_id: requestId, action, status: 'pending', popup: {
     title: 'Website action title', detail: 'Website explanation', confirm_label: 'Website confirm label',
     running_message: 'Website running message',
   }, audit_selection: {
     major_area: {value: 'ENGR', label: 'Engineering'}, audit: {value: 'CMPSC-BS', label: 'CS'},
   }};
+  if (audits) job.audits = audits;
+  let selected = {major_area: {value: 'LS', label: 'Letters and Science'}, audit: {value: 'MATH-BS', label: 'Math'}};
   const makeStorage = (area) => ({
     get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map((key) => [key, storage[area][key]])),
-    set: async (patch) => Object.assign(storage[area], patch),
+    set: async (patch) => { if (patch.lastRun) calls.runs.push({...patch.lastRun}); Object.assign(storage[area], patch); },
     remove: async (keys) => (Array.isArray(keys) ? keys : [keys]).forEach((key) => delete storage[area][key]),
   });
   const chrome = {
     runtime: {
-      id: 'synthetic', getManifest: () => ({version: '1.3'}),
+      id: 'synthetic', getManifest: () => ({version: '1.4'}),
       onInstalled: {addListener() {}},
       onMessageExternal: {addListener: (fn) => { listeners.external = fn; }},
       onMessage: {addListener: (fn) => { listeners.internal = fn; }},
@@ -48,6 +51,7 @@ function setup({getStatus = 200, action = 'add_major', postStatus = 200, resultS
       openPopup: async () => { calls.popup++; }, setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {},
     },
     scripting: {executeScript: async ({func, args}) => {
+      calls.injections.push(func.name);
       if (func.name === hangChromeAt) {
         setImmediate(() => { tabExists = false; listeners.removed(1); });
         return new Promise(() => {});
@@ -57,19 +61,27 @@ function setup({getStatus = 200, action = 'add_major', postStatus = 200, resultS
         tabExists = false;
         if (!missingTab) listeners.removed(1);
       }
+      if (func.name === 'auditReadyState' && selected.audit.value === closeAuditValue) {
+        tabExists = false;
+        listeners.removed(1);
+      }
       if (!tabExists) throw new Error('No tab with id: 1');
       let result;
       switch (func.name) {
         case 'documentState': result = {ready: true, marked: false}; break;
         case 'scheduleState': result = {found: true, quarter: 'FALL 2026'}; break;
-        case 'auditSelectionState': result = {found: true, majorArea: {value: 'ENGR', label: 'Engineering'}, audit: {value: 'CMPSC-BS', label: 'CS'}}; break;
-        case 'ensureInProgressChecked': result = {found: !auditFails}; break;
+        case 'auditSelectionState': result = {found: true, ready: true, signature: JSON.stringify(selected), majorArea: selected.major_area, audit: selected.audit}; break;
+        case 'ensureInProgressChecked': result = {found: !auditFails, checked: !auditFails && !unchecked}; break;
         case 'clickRunAudit': result = {found: true}; break;
-        case 'auditReadyState': result = {hasResults: true, running: false}; break;
+        case 'auditReadyState': result = {hasResults: true, freshResults: staleResults-- <= 0, running: false}; break;
         case 'dismissWelcomeLetter': result = {clicked: false}; break;
         case 'domSize': result = 1; break;
         case 'capturePage': result = '<html>synthetic</html>'; break;
-        case 'chooseAuditOption': calls.selections.push(args); result = {found: true, matched: true, changed: false}; break;
+        case 'chooseAuditOption':
+          calls.selections.push(args);
+          if (!wrongSelection) selected[args[0]] = {value: args[1].value || (args[0] === 'major_area' ? 'LS' : 'MATH-BS'), label: args[1].label};
+          result = {found: true, matched: args[1].value !== failAuditValue, changed: true};
+          break;
       }
       return [{result}];
     }},
@@ -179,16 +191,56 @@ async function popupScenario(initialState, {respond} = {}) {
   s.listeners.external({type: 'UCSBPLAT_PREPARE_ACTION', action: 'arbitrary', requestId}, {url: 'https://ucsbplat.com'}, (r) => { reply = r; });
   check(reply.error === 'unsupported_action', 'unknown action rejected');
   s.listeners.external({type: 'UCSBPLAT_EXTENSION_PING'}, {url: 'https://ucsbplat.com'}, (r) => { reply = r; });
-  check(reply.protocolVersion === 4, 'protocol version identifies request-aware extension');
+  check(reply.protocolVersion === 5, 'protocol version identifies multi-major extension');
   await vm.runInContext(`prepareWebsiteAction('add_major', '${requestId}')`, s.context);
   check(s.storage.session.pendingWebsiteAction.requestId === requestId && s.calls.tabs === 0, 'preparation does not start GOLD');
   await vm.runInContext(`runSync('add_major', '${requestId}')`, s.context);
   check(s.calls.posts[0].action === 'add_major' && s.calls.posts[0].request_id === requestId, 'website request carried through submission');
-  check(s.calls.selections.length === 0 && s.calls.posts[0].schedule_page, 'add-major captures schedule using current GOLD choice');
+  check(s.calls.selections.length === 2 && s.calls.posts[0].schedule_page, 'add-major explicitly restores both requested fields and captures schedule');
   check(s.storage.local.lastRun.message === 'Website saved result.', 'popup uses website result');
   check(!JSON.stringify(s.storage).includes('<html>'), 'captured HTML never stored');
   s = setup({action: 'sync_all'}); await vm.runInContext(`runSync('sync_all', '${requestId}')`, s.context);
   check(s.calls.selections.length === 2 && s.calls.selections[1][1].value === 'CMPSC-BS', 'normal sync restores primary selectors');
+  const targets = [
+    {audit_id: 1, label: 'CS B.S.', audit_selection: {major_area: {value: 'ENGR', label: 'Engineering'}, audit: {value: 'CMPSC-BS', label: 'CS B.S.'}}},
+    {audit_id: 2, label: 'BS - Applied Mathematics', audit_selection: {major_area: {value: 'LS', label: 'Applied Mathematics'}, audit: {value: 'MATH-BS', label: 'BS - Applied Mathematics'}}},
+  ];
+  s = setup({action: 'sync_all', audits: targets});
+  await vm.runInContext(`runSync('sync_all', '${requestId}')`, s.context);
+  check(s.calls.posts[0].major_progress_checks.length === 2 && s.calls.posts[0].major_progress_checks[1].audit_id === 2,
+    'full update submits one capture per website-owned major');
+  check(s.calls.injections.filter((name) => name === 'scheduleState').length === 1,
+    'multi-major update captures current courses only once');
+  check(s.calls.selections.map(([kind, option]) => `${kind}:${option.value}`).join(',')
+    === 'major_area:ENGR,audit:CMPSC-BS,major_area:LS,audit:MATH-BS', 'both dependent selectors are applied in order for every major');
+  check(s.calls.runs.some((run) => run.step.includes('Checking your current courses'))
+    && s.calls.runs.some((run) => run.step.includes('Running the major progress check for CS B.S.'))
+    && s.calls.runs.some((run) => run.step.includes('Running the major progress check for BS - Applied Mathematics')),
+    'running progress identifies current courses and each requested major');
+  check(s.calls.reports.some((report) => report.message.includes('BS - Applied Mathematics')),
+    'website receives live major progress as well as the popup');
+  check(!JSON.stringify(s.storage).includes('<html>'), 'multi-major HTML remains in memory only');
+  s = setup({action: 'sync_all', audits: targets, failAuditValue: 'MATH-BS', resultStatus: 'partial'});
+  await vm.runInContext(`runSync('sync_all', '${requestId}')`, s.context);
+  check(s.calls.posts[0].major_progress_checks[1].major_progress_check === '' && s.storage.local.lastRun.status === 'partial',
+    'one failed major is explicitly represented and server decides partial result');
+  s = setup({action: 'sync_all', audits: targets, closeAuditValue: 'MATH-BS'});
+  await vm.runInContext(`runSync('sync_all', '${requestId}')`, s.context);
+  check(s.calls.posts.length === 0 && s.storage.local.lastRun.status === 'error',
+    'closing GOLD on the second major aborts the whole capture without submitting earlier pages');
+  for (const options of [{wrongSelection: true}, {unchecked: true}]) {
+    s = setup(options);
+    await vm.runInContext(`runSync('add_major', '${requestId}')`, s.context);
+    check(!s.calls.injections.includes('clickRunAudit') && s.calls.posts.length === 0,
+      'selection mismatch or unchecked in-progress courses blocks audit execution and submission');
+  }
+  s = setup({staleResults: 3});
+  await vm.runInContext(`runSync('add_major', '${requestId}')`, s.context);
+  check(s.calls.injections.filter((name) => name === 'auditReadyState').length === 4 && s.calls.posts.length === 1,
+    'previous audit results are ignored until a fresh result is ready');
+  s = setup(); delete s.job.audit_selection;
+  await vm.runInContext(`runSync('add_major', '${requestId}')`, s.context);
+  check(s.calls.tabs === 0 && s.calls.posts.length === 0, 'new major import cannot fall back to an unspecified GOLD choice');
   s = setup({action: 'refresh_major'}); await vm.runInContext(`runSync('refresh_major', '${requestId}')`, s.context);
   check(s.calls.selections[1][1].value === 'CMPSC-BS', 'selected major refresh uses server-owned selectors');
   s = setup({action: 'sync_all', resultStatus: 'partial'}); await vm.runInContext(`runSync('sync_all', '${requestId}')`, s.context);
@@ -311,7 +363,10 @@ async function popupScenario(initialState, {respond} = {}) {
   await p.elements.run.events.click();
   check(p.messages.some((m) => m.type === 'START_SYNC' && m.requestId === requestId), 'popup confirms the exact website request');
   await p.update({lastRun: {requestId, popup, status: 'running', step: 'Detailed automation step'}});
-  check(p.elements.run.hidden && p.elements.status.textContent === popup.running_message, 'active popup shows website running copy without automation details');
+  check(p.elements.run.hidden && p.elements.status.textContent === 'Detailed automation step', 'active popup shows the live automation step');
+  await p.update({lastRun: {requestId, popup, status: 'running', step: 'Running the major progress check for BS - Applied Mathematics…'}});
+  check(p.elements.status.textContent.includes('BS - Applied Mathematics') && p.elements.website.hidden,
+    'progress updates name the major without adding website navigation');
   await p.update({lastRun: {requestId, popup, status: 'partial', message: 'Website partial save message'}});
   check(p.elements.status.textContent === 'Website partial save message', 'live popup displays server partial result');
   await p.update({lastRun: {requestId, popup, status: 'confirm'}, pendingChange: {requestId, message: 'Website asks for major replacement'}});
