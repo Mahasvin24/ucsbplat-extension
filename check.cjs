@@ -148,16 +148,30 @@ async function popupScenario(initialState) {
 (async () => {
   let s = setup(); let reply;
   s.storage.local.lastSync = {syncedAt: Date.now() - 3 * 86400000};
-  for (const url of ['https://ucsbplat.com/profile/', 'https://ucsbplat.com/profile/home',
-    'http://localhost:12345/profile/home', 'https://my.sa.ucsb.edu/gold/StudentSchedule.aspx']) {
+  for (const url of ['https://ucsbplat.com/', 'https://ucsbplat.com/profile/', 'https://ucsbplat.com/profile/home',
+    'http://localhost:12345/', 'http://localhost:12345/profile/home', 'https://example.com/',
+    'https://my.sa.ucsb.edu/gold/StudentSchedule.aspx']) {
     for (const listener of s.listeners.updated) listener(99, {status: 'complete'}, {active: true, url});
   }
   await new Promise((resolve) => setImmediate(resolve));
   check(s.calls.popup === 0 && s.calls.tabs === 0, 'loading profile or GOLD pages never opens popup or starts automation, even with stale legacy sync data');
-  s.listeners.external({type: 'UCSBPLAT_EXTENSION_PING'}, {url: 'https://ucsbplat.com'}, () => {});
-  check(s.calls.popup === 0, 'website extension detection never opens popup');
+  for (const origin of ['https://ucsbplat.com', 'http://localhost:12345']) {
+    for (let i = 0; i < 3; i++) {
+      s.listeners.external({type: 'UCSBPLAT_EXTENSION_PING'}, {url: origin}, () => {});
+    }
+  }
+  check(s.calls.popup === 0, 'repeated website extension detection on production and localhost never opens popup');
   s.listeners.external({type: 'UCSBPLAT_OPEN_POPUP'}, {url: 'https://ucsbplat.com'}, (r) => { reply = r; });
   check(reply === undefined && s.calls.popup === 0, 'legacy popup-only command cannot open popup');
+  for (const origin of ['https://ucsbplat.com', 'http://localhost:12345']) {
+    for (const action of ['add_major', 'sync_all', 'refresh_major']) {
+      const clicked = setup({action});
+      const response = await new Promise((resolve) => clicked.listeners.external(
+        {type: 'UCSBPLAT_PREPARE_ACTION', action, requestId}, {url: `${origin}/profile/home`}, resolve));
+      check(response.ok && response.opened && clicked.calls.popup === 1 && clicked.calls.tabs === 0,
+        `${origin} ${action} button request opens one confirmation without starting GOLD`);
+    }
+  }
   s = setup();
   s.listeners.external({type: 'UCSBPLAT_PREPARE_ACTION', action: 'add_major', requestId}, {url: 'https://evil.example'}, (r) => { reply = r; });
   check(reply === undefined && !s.storage.session.pendingWebsiteAction, 'untrusted origin rejected');
