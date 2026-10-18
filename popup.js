@@ -19,6 +19,7 @@ const labels = {
 function showStatus(status, message = "") {
   document.body.dataset.state = status;
   els.intro.hidden = status !== "idle";
+  els.website.hidden = status !== "idle";
   els.websiteAction.hidden = !["prepared", "starting"].includes(status);
   if (status === "error") {
     preparedAction = null;
@@ -33,8 +34,6 @@ function showStatus(status, message = "") {
     ? "Review the saved details on your profile."
     : status === "signin" ? "Sign in on UCSBPlat, then start a new update from your profile." : "";
   els.statusHint.hidden = !els.statusHint.textContent;
-  els.website.textContent = status === "signin" ? "Sign in to UCSBPlat"
-    : ["success", "partial"].includes(status) ? "View my profile" : "Open UCSBPlat";
 }
 
 els.website.addEventListener("click", () => chrome.tabs.create({ url: `${UCSBPLAT_ORIGIN}/profile/` }));

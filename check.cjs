@@ -299,6 +299,7 @@ async function popupScenario(initialState, {respond} = {}) {
   check(!s.storage.local.lastSync && !JSON.stringify(s.storage).includes('<html>'), 'extension stores neither detailed sync history nor captured pages');
   let p = await popupScenario({lastRun: {status: 'success', message: 'Old result', requestId}});
   check(!p.elements.intro.hidden && p.elements.run.hidden && p.elements.websiteAction.hidden, 'raw popup directs to website with no standalone action');
+  check(!p.elements.website.hidden, 'empty toolbar popup offers the website entry point');
   check(p.elements.status.textContent === '' && !('summary' in p.elements), 'raw popup does not show past sync details');
   p.elements.website.events.click();
   check(p.tabs[0].url === 'https://ucsbplat.com/profile/', 'website link opens profile');
@@ -314,23 +315,25 @@ async function popupScenario(initialState, {respond} = {}) {
   await p.update({lastRun: {requestId, popup, status: 'partial', message: 'Website partial save message'}});
   check(p.elements.status.textContent === 'Website partial save message', 'live popup displays server partial result');
   await p.update({lastRun: {requestId, popup, status: 'confirm'}, pendingChange: {requestId, message: 'Website asks for major replacement'}});
-  check(!p.elements.confirm.hidden && p.elements.confirmMessage.textContent === 'Website asks for major replacement', 'major-change prompt uses website message');
+  check(!p.elements.confirm.hidden && p.elements.website.hidden && p.elements.confirmMessage.textContent === 'Website asks for major replacement', 'major-change prompt uses website message without website navigation');
   p = await popupScenario({lastRun: {requestId, popup, status: 'running'}});
   check(p.body.dataset.state === 'running' && p.elements.status.textContent === popup.running_message, 'reopening during a run resumes website action');
   await p.update({lastRun: {requestId, popup, status: 'error', message: 'The GOLD tab was closed.'}});
-  check(p.elements.run.hidden && p.elements.status.textContent.includes('GOLD tab was closed'), 'closed tab presents failure and website link without standalone retry');
+  check(p.elements.run.hidden && p.elements.status.textContent.includes('GOLD tab was closed'), 'closed tab presents failure without standalone retry');
 
   for (const action of ['add_major', 'sync_all', 'refresh_major']) {
     const copy = setup({action}).job.popup;
     p = await popupScenario({pendingWebsiteAction: {requestId, type: action, popup: copy}});
     check(p.body.dataset.state === 'prepared' && !p.elements.run.disabled && !p.elements.cancelWebsiteAction.hidden,
       `${action} offers explicit confirmation and cancellation`);
+    check(p.elements.website.hidden, `${action} confirmation omits website navigation`);
     for (const status of ['running', 'success', 'partial', 'error', 'signin', 'cancelled', 'expired']) {
       await p.update({lastRun: {requestId, popup: copy, status, message: `Server ${status}`}});
       check(p.body.dataset.state === status && p.elements.run.hidden && p.elements.confirm.hidden,
         `${action} ${status} has a distinct state without an unintended confirmation`);
       check(p.elements.websiteAction.hidden && p.elements.intro.hidden,
         `${action} ${status} focuses on the outcome instead of repeating the initial question`);
+      check(p.elements.website.hidden, `${action} ${status} omits website navigation`);
       check(p.elements.status.textContent === (status === 'running' ? copy.running_message : `Server ${status}`),
         `${action} ${status} preserves website copy`);
       check(p.elements.statusHint.hidden === !['success', 'partial', 'signin'].includes(status),
@@ -352,7 +355,8 @@ async function popupScenario(initialState, {respond} = {}) {
   const click = p.elements.run.events.click();
   await p.elements.run.events.click();
   check(p.body.dataset.state === 'starting' && p.elements.run.disabled && p.elements.cancelWebsiteAction.disabled
-    && p.messages.filter((m) => m.type === 'START_SYNC').length === 1, 'starting feedback blocks duplicate confirmation and cancellation');
+    && p.elements.website.hidden && p.messages.filter((m) => m.type === 'START_SYNC').length === 1,
+    'starting feedback blocks duplicate confirmation and cancellation without website navigation');
   releaseStart({started: false, message: 'Request expired. Start again from your profile.'});
   await click;
   check(p.body.dataset.state === 'error' && p.elements.run.hidden && p.elements.cancelWebsiteAction.hidden

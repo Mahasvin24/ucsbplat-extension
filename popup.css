@@ -42,7 +42,8 @@ button:disabled { opacity: .55; cursor: default; }
 .site-brand img { object-fit: contain; }
 .site-brand span { font-size: 23px; font-weight: 720; letter-spacing: -.7px; }
 .header-label { padding: 3px 7px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); font-size: 11px; white-space: nowrap; }
-main { padding: 20px 20px 0; }
+main { padding: 20px; }
+body[data-state="idle"] main { padding-bottom: 0; }
 
 .request-panel {
   padding: 20px;
@@ -94,19 +95,14 @@ body:not([data-state="idle"]):not([data-state="prepared"]):not([data-state="star
 .button-quiet { min-height: 32px; border-color: transparent; color: var(--muted); box-shadow: none; }
 .button-quiet:hover:not(:disabled) { border-color: transparent; }
 .profile-button { width: 100%; margin-top: 14px; }
-body[data-state="idle"] .profile-button,
-body[data-state="success"] .profile-button,
-body[data-state="signin"] .profile-button { color: #fff; background: var(--accent); border-color: var(--accent); }
-body[data-state="idle"] .profile-button:hover,
-body[data-state="success"] .profile-button:hover,
-body[data-state="signin"] .profile-button:hover { background: #032b48; border-color: #032b48; }
 
 .confirm { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
 .confirm h2 { color: #805618; font-size: 15px; font-weight: 600; letter-spacing: -.15px; }
 .confirm p { margin-top: 8px; font-size: 13px; line-height: 1.65; }
 .confirm-actions { display: grid; gap: 8px; margin-top: 16px; }
 
-.page-footer { display: flex; align-items: flex-start; gap: 7px; padding: 16px 23px 19px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.page-footer { display: none; align-items: flex-start; gap: 7px; padding: 16px 23px 19px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+body[data-state="idle"] .page-footer { display: flex; }
 .page-footer svg { flex-shrink: 0; width: 14px; height: 14px; margin-top: 1px; }
 
 body[data-state="success"] { --state-ink: #276749; --state-surface: #edf7f0; }

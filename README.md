@@ -140,17 +140,20 @@ presentation states and keep the website's title, description, button, and runni
 
 | State | Popup behavior |
 | --- | --- |
-| Toolbar / idle | Link to the profile; no past results or standalone sync |
+| Toolbar / idle | Open ucsbplat.com button to the profile; no past results or standalone sync |
 | Prepared | Website action with confirm and cancel controls |
 | Starting | Immediate feedback; confirm and cancel disabled while dispatching |
 | Running | Website running message; no duplicate start control |
 | Major replacement | Website explanation with explicit replace/cancel controls |
-| Success | Saved message and link to profile details |
-| Partial save | Distinct warning state and link to profile details |
-| Error / sign-in required | Actionable message and profile/sign-in link |
+| Success | Saved message |
+| Partial save | Distinct warning state with the website's explanation |
+| Error / sign-in required | Actionable message |
 | Cancelled | Cancellation feedback for the current popup |
-| Expired confirmation | Explanation and profile link to begin a fresh request |
-| Worker unavailable | Recovery message and profile link |
+| Expired confirmation | Explanation to begin a fresh request on the website |
+| Worker unavailable | Recovery message |
+
+Only the idle view shows website navigation and the general privacy footer. Loaded
+requests show their own information and any confirmation/cancellation controls.
 
 Finished results appear only for the request this popup is following. Reopening the
 toolbar after completion returns to the profile entry point. Website API errors
