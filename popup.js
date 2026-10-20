@@ -3,7 +3,7 @@ import { UCSBPLAT_ORIGIN } from "./config.js";
 const els = Object.fromEntries([
   "intro", "websiteAction", "websiteActionTitle", "websiteActionDetail", "status", "stateLabel",
   "run", "cancelWebsiteAction", "confirm", "confirmMessage", "confirmYes", "confirmNo", "website",
-  "majorsSection", "majors", "safeCloseNote",
+  "majorsSection", "majors", "safeCloseNote", "debug",
 ].map((id) => [id, document.getElementById(id)]));
 let preparedAction = null;
 let viewRequestId = null;
@@ -21,6 +21,7 @@ function showStatus(status, message = "") {
   document.body.dataset.state = status;
   els.intro.hidden = status !== "idle";
   els.website.hidden = status !== "idle";
+  els.debug.hidden = !["idle", "error", "success", "partial", "cancelled", "expired", "signin"].includes(status);
   els.websiteAction.hidden = !["prepared", "starting"].includes(status);
   els.safeCloseNote.hidden = status !== 'running';
   if (status === "error") {
@@ -47,6 +48,10 @@ function renderPlan(popup, status) {
 els.website.addEventListener("click", async () => {
   const sourceWindow = await chrome.windows.getLastFocused({windowTypes: ['normal']});
   await chrome.tabs.create({url: `${UCSBPLAT_ORIGIN}/profile/`, windowId: sourceWindow.id});
+});
+els.debug.addEventListener("click", async () => {
+  const sourceWindow = await chrome.windows.getLastFocused({windowTypes: ['normal']});
+  await chrome.tabs.create({url: `${UCSBPLAT_ORIGIN}/profile/sync-debug`, windowId: sourceWindow.id});
 });
 async function send(type, extra = {}) {
   try {

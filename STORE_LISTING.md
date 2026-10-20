@@ -31,8 +31,11 @@ this file, `manifest.json`, and <https://ucsbplat.com/privacy>.
 >
 > It runs only when you ask it to. It does not read GOLD in the background, does not run
 > on other websites, and never sees your GOLD password. The pages it reads are used once
-> to pull out your courses and requirements, and are then discarded — they are never
-> stored or logged. You can delete everything it has synced at any time from your
+> to pull out your courses and requirements, and are then discarded during a normal sync.
+> If a sync fails, you can consent to run it again and send a report. UCSBPlat keeps that
+> run's captured GOLD pages for up to 7 days, even if the retry succeeds, to investigate.
+> Reports are encrypted and can be deleted from Data & privacy.
+> They are never logged. You can delete everything it has synced at any time from your
 > UCSBPlat profile page.
 >
 > UCSBPlat is a student project by UCSB ACM, sponsored by Associated Students. It is not
@@ -109,7 +112,7 @@ communications, location, web history, or user activity. The extension does not 
 these separately. Class meeting rooms are included in website content, not device location.
 
 Transient transmission is still collection; do not omit the personal-information disclosure
-just because the server discards the HTML. The extension neither reads nor stores session
+because normal sync HTML is discarded. The extension neither reads nor stores session
 cookies or GOLD passwords; the browser attaches the UCSBPlat session cookie to API requests.
 See Google's [privacy-field instructions](https://developer.chrome.com/docs/webstore/cws-dashboard-privacy).
 
@@ -166,7 +169,7 @@ The script intercepts all network requests and supplies synthetic confirmation d
 3. **Deploy the website first**, then read <https://ucsbplat.com/privacy> against this
    file. Every disclosure here must be true *of the live site* — a reviewer reads the
    deployed policy, not the repository. Disclose personal information in the dashboard
-   because full GOLD page contents can include it, even though raw HTML is discarded.
+   because full GOLD page contents can include it, even when raw HTML is discarded.
 4. The existing published ID `cffmlcefmeeeiidkdffgjimpjojiibap` and current development ID
    are already configured in the website bridge and API allowlist. No manual ID setup
    is needed for an update to this store item. A different unpacked checkout may need
@@ -196,8 +199,10 @@ the major being checked. A full update visits every saved major using both store
 selectors; adding a major explicitly collects both dropdown labels. The website
 shows detailed results, failure, and cancellation. The toolbar popup cannot start a sync
 without a valid website request, and closing the GOLD tab ends capture with a retryable error. These
-actions collect the same two GOLD pages and academic fields described above, add no
-permissions, and never store captured HTML. Deploy the updated privacy policy before
+actions collect the same two GOLD pages and academic fields described above and add no
+permissions. A separately consented report retry retains submitted captures for up to
+7 days, including successful retries. The website dialog shows the error, consent,
+progress, and confirmation that the report was saved. Deploy the updated privacy policy before
 submitting this release. Both development harnesses (`check.cjs`, `check-browser.cjs`) are excluded by `package.sh`.
 
 Release v1.6 restores the standard dark toolbar popup with bullet-listed majors.

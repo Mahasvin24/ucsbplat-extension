@@ -43,6 +43,32 @@ warnings list, or reminder settings. The extension reports running/failure/cance
 same account-scoped request; it cannot declare a save successful itself. Prepared actions
 can be cancelled in the popup. No captured HTML is written to extension storage.
 
+After a failed or partial sync, a website dialog shows the error and offers to run
+GOLD again and send a report. The student must consent and confirm in the extension.
+The report retains the original error, run steps, and submitted pages even if the retry
+succeeds. Reports are encrypted, expire after seven days, and can be deleted through
+Data & privacy. The dialog shows progress followed by a thank-you state once the report
+is saved. Closing it does not stop the run. No captured HTML enters extension storage.
+The temporary **Debug run** toolbar button opens this same dialog on your profile
+for manual testing. It starts a fresh consented report without requiring a prior failure
+and retains submitted pages even on success. Manual tests bypass issue deduplication.
+There is no separate debug page. Remove the temporary button before Web Store submission.
+
+The server suppresses repeat prompts for the same account, action, targets, error,
+warnings, structural diagnostics, and stopped step while its report exists. Pending
+confirmation reserves the issue for 15 minutes; starting the run extends that reservation
+to the report's expiry. Cancellation or course-data deletion releases it.
+Reload the unpacked extension at `chrome://extensions` to pick up the progress reset fix.
+Every new request resets progress; only a fully successful sync reaches 100 percent.
+
+From the website repository, operators can list reports with
+`python -m scripts.read_sync_reports`, or inspect a reference with
+`python -m scripts.read_sync_reports --id REFERENCE`. To export its HTML, create a private
+directory (mode 700) and add `--raw-dir /absolute/private/directory`. Use the server's
+configured environment; the report encryption uses its Flask secret. The operator tool
+prints metadata only unless raw export is explicitly requested. A report cannot include
+pages the extension never captured/submitted (for example, a tab closed during automation).
+
 Release v1.6 uses protocol v5 and the corresponding website changes. No new database
 migration is needed; the existing selector columns and per-major audit tables are reused. A website message
 cannot start GOLD automation or read extension storage. Status receipts contain no captured

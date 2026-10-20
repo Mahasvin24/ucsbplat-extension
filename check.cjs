@@ -413,9 +413,14 @@ async function popupScenario(initialState, {respond} = {}) {
   check(p.elements.status.textContent === '' && !('summary' in p.elements), 'raw popup does not show past sync details');
   await p.elements.website.events.click();
   check(p.tabs[0].url === 'https://ucsbplat.com/profile/', 'website link opens profile');
+  check(!p.elements.debug.hidden, 'temporary debug button is available for manual testing');
+  await p.elements.debug.events.click();
+  check(p.tabs[1].url === 'https://ucsbplat.com/profile/sync-debug'
+    && !p.messages.some(m => m.type === 'START_SYNC'), 'debug button opens website consent without starting automation');
   s = setup();
   const popup = s.job.popup;
   p = await popupScenario({pendingWebsiteAction: {requestId, popup}});
+  check(p.elements.debug.hidden, 'manual debug button stays hidden during confirmation');
   check(p.elements.websiteActionTitle.textContent === popup.title && p.elements.websiteActionDetail.textContent === popup.detail, 'popup renders website action copy');
   check(p.elements.run.textContent === popup.confirm_label && !p.elements.run.hidden, 'website controls confirmation label');
   await p.elements.run.events.click();
