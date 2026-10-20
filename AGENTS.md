@@ -130,5 +130,7 @@ synthetic controls only; see README for verification and remaining real-GOLD che
 The toolbar uses `action.default_popup`, never a separate `chrome.windows` popup.
 Closing the popup must not cancel the worker. Numbered progress belongs only on the
 website; the popup handles confirmation and briefly points there while running.
-Website progress uses 4 + 3 × requested majors, completed only by server success/partial.
+Website progress uses 4 + 3 × requested majors. Only server success completes the bar;
+partial saves and failures keep the step reached. New requests must reset progress,
+including when the patch explicitly sets it to null. Never inherit a previous run's bar.
 Schedule capture must wait for content and preserve live select values in captured HTML.

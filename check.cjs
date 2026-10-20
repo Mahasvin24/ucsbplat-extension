@@ -218,6 +218,17 @@ async function popupScenario(initialState, {respond} = {}) {
   check(s.calls.selections.length === 2 && s.calls.posts[0].schedule_page, 'add-major explicitly restores both requested fields and captures schedule');
   check(s.storage.local.lastRun.message === 'Website saved result.', 'popup uses website result');
   check(!JSON.stringify(s.storage).includes('<html>'), 'captured HTML never stored');
+  s = setup({initialLocal: {lastRun: {requestId: 'old-request', status: 'success',
+    progress: {current: 10, total: 10}}}});
+  await vm.runInContext(`runSync('add_major', '${requestId}')`, s.context);
+  check(s.calls.reports[0].progress === undefined && s.calls.runs[0].progress === null,
+    'new run does not report or display the previous run at 100 percent');
+  check(s.calls.reports.filter(r => r.progress).every(r => r.progress.total === 7),
+    'new request never borrows the previous run step count');
+  s = setup({resultStatus: 'partial'});
+  await vm.runInContext(`runSync('add_major', '${requestId}')`, s.context);
+  check(s.storage.local.lastRun.progress.current === 6 && s.storage.local.lastRun.progress.total === 7,
+    'partial save keeps the progress reached instead of claiming 100 percent');
   s = setup({scheduleDelay: 2});
   await vm.runInContext(`runSync('add_major', '${requestId}')`, s.context);
   check(s.calls.injections.filter(name => name === 'scheduleState').length === 3 && s.calls.posts[0].schedule_page,

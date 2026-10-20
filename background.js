@@ -550,7 +550,8 @@ async function submit(payload, context, confirmMajorChange = false) {
     }
     awaitingConfirmation = null;
     await setRun({ status: data.status === "partial" ? "partial" : "success", step: "", message: data.message ?? "Update saved.",
-      ...(context.totalSteps ? {progress: {current: context.totalSteps, total: context.totalSteps}} : {}), finishedAt: Date.now() });
+      ...(context.totalSteps ? {progress: {current: data.status === 'success' ? context.totalSteps : context.totalSteps - 1,
+        total: context.totalSteps}} : {}), finishedAt: Date.now() });
     return;
   }
 
@@ -752,17 +753,20 @@ async function inject(tabId, func, args = []) {
 }
 
 async function setRun(patch) {
-  const { lastRun = {} } = await chrome.storage.local.get("lastRun");
+  const stored = await chrome.storage.local.get("lastRun");
+  // A new request must never inherit the previous run's finished progress.
+  const lastRun = patch.requestId && patch.requestId !== stored.lastRun?.requestId ? {} : stored.lastRun ?? {};
   if (activeRequestId && (["running", "error", "signin", "cancelled"].includes(patch.status)
       || (!patch.status && patch.step))) {
     const job = await reportWebsiteStatus(activeRequestId, patch.status === "signin" ? "error" : patch.status || 'running',
-      patch.message || patch.step || "Working in GOLD…", patch.progress ?? lastRun.progress);
+      patch.message || patch.step || "Working in GOLD…",
+      Object.hasOwn(patch, 'progress') ? patch.progress : lastRun.progress);
     if (["success", "partial"].includes(job?.status)) {
       patch = {...patch, status: job.status, message: job.message, step: '',
         ...(job.progress ? {progress: job.progress} : {}), finishedAt: Date.now()};
     }
   }
-  if (['success', 'partial'].includes(patch.status)) {
+  if (patch.status === 'success') {
     const progress = patch.progress ?? lastRun.progress;
     if (progress) patch.progress = {...progress, current: progress.total};
   }
